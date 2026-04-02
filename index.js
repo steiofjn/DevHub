@@ -298,14 +298,12 @@ if (accountAge < MIN_ACCOUNT_AGE_DAYS) {
   return;
 }
 
-  // ===== BOT RAID PROTECTION =====
+  // ===== BOT JOIN LOG (NO KICK) =====
 if (member.user.bot) {
-
-  await member.kick("Unauthorized bot").catch(() => {});
 
   member.guild.channels.cache
     .get(FULL_LOG_CHANNEL_ID)
-    ?.send(`🤖 Bot kicked: ${member.user.tag}`);
+    ?.send(`🤖 Bot joined: ${member.user.tag}`);
 
   return;
 }
