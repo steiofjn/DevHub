@@ -167,6 +167,13 @@ client.once("ready", async () => {
 "> <:CF11:1488888964755492944> Member Reports\n\n" +
 
 "<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
+  
+"<:paint1:1489376215146954983> **Designer Application**\n" +
+"> <:CF11:1488888964755492944> Become a Designer\n" +
+"> <:CF11:1488888964755492944> Make some Money!\n" +
+"> <:CF11:1488888964755492944> Show your talent\n\n" +
+
+"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
 
 "<:IA:1488906883648458863> **IA Support**\n" +
 "> <:CF11:1488888964755492944> Staff Reports\n" +
@@ -194,29 +201,35 @@ client.once("ready", async () => {
 .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1488908758263402556/image.png")
 .setFooter({ text: "Developer Hub • Support System" });
   
-  const row = new ActionRowBuilder().addComponents(
+const row = new ActionRowBuilder().addComponents(
   new StringSelectMenuBuilder()
     .setCustomId("ticket_select")
     .setPlaceholder("Select a ticket type...")
     .addOptions([
       {
-  label: "General Support",
-  description: "Questions, help, or general issues",
-  value: "general_ticket",
-  emoji: { id: "1488905927896596582" }
-},
+        label: "General Support",
+        description: "Questions, help, or general issues",
+        value: "general_ticket",
+        emoji: { id: "1488905927896596582" }
+      },
       {
-  label: "Internal Affairs",
-  description: "Report staff or serious concerns",
-  value: "ia_ticket",
-  emoji: { id: "1480281879516283071" }
-},
+        label: "Internal Affairs",
+        description: "Report staff or serious concerns",
+        value: "ia_ticket",
+        emoji: { id: "1480281879516283071" }
+      },
       {
-  label: "Management",
-  description: "Contact high command",
-  value: "mgmt_ticket",
-  emoji: { id: "1480283687223427313" }
-}
+        label: "Management",
+        description: "Contact high command",
+        value: "mgmt_ticket",
+        emoji: { id: "1480283687223427313" }
+      },
+      {
+        label: "Designer Applications",
+        description: "Apply to become a designer",
+        value: "designer_ticket",
+        emoji: { id: "1489376215146954983" }
+      }
     ])
 );
 
@@ -1379,6 +1392,8 @@ if (interaction.isButton()) {
 
 if (interaction.customId === "claim_ticket") {
 
+
+
   // Only allow staff to claim
   if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
     return interaction.reply({ content: "❌ Only ticket staff can claim tickets.", ephemeral: true });
@@ -1423,9 +1438,10 @@ await interaction.deferUpdate();
 
 if (
   (interaction.isStringSelectMenu() && interaction.customId === "ticket_select") ||
-  interaction.customId === "general_ticket" ||
-  interaction.customId === "ia_ticket" ||
-  interaction.customId === "mgmt_ticket"
+interaction.customId === "general_ticket" ||
+interaction.customId === "ia_ticket" ||
+interaction.customId === "mgmt_ticket" ||
+interaction.customId === "designer_ticket""
 ) {
 
 const user = interaction.user;
@@ -1453,6 +1469,11 @@ title = "Internal Affairs Support";
 if (type === "mgmt") {
 name = `🔴-mgmt-${cleanName}`;
 title = "Management Support";
+}
+
+if (type === "designer") {
+  name = `🔴-designer-${cleanName}`;
+  title = "Designer Application";
 }
 
 const channel = await guild.channels.create({
@@ -1489,11 +1510,22 @@ PermissionsBitField.Flags.SendMessages
 const embed = new EmbedBuilder()
 .setTitle(title)
 .setDescription(
-"Thank you for opening a ticket!\n\n" +
-"**Please provide:**\n" +
-"• A detailed explanation of your issue\n" +
-"• Any screenshots (if applicable)\n\n" +
-" A staff member will assist you shortly."
+  type === "designer"
+    ? "Thank you for opening an application! Please answer the following questions and send any images you have that can showcase your previous work."
+    : "Thank you for opening a ticket!\n\n" +
+      "**Please provide:**\n" +
+      "<:CF11:1488888964755492944> Q1 - What is your Roblox Username?\n"  +
+      "<:CF11:1488888964755492944> Q2 - What do you focus on? GFX, Clothing, etc\n"  +
+      "<:CF11:1488888964755492944> Q3 - How old are you?\n"  +
+      "<:CF11:1488888964755492944> Q4 - What design tools do you use? Photpea, Photoshop, etc\n"  +
+      "<:CF11:1488888964755492944> Q5 - Do you have any previous experience designing for Roblox groups or communities? If yes, explain.\n"  +
+      "<:CF11:1488888964755492944> Q6 - How would you handle a request from a client that you disagree with or find difficult?\n"  +
+      "<:CF11:1488888964755492944> Q7 - How do you ensure your designs are high quality and meet requirements?\n"  +
+      "<:CF11:1488888964755492944> Q8 - Are you able to meet deadlines and work under pressure? Explain your approach.\n"  +
+      "<:CF11:1488888964755492944> Q9 - How do you handle feedback or criticism on your designs?\n"  +
+      "<:CF11:1488888964755492944> Q10 - Is there anything else we should know about you or your design experience?\n"  +
+      "<:CF11:1488888964755492944> Any screenshots (if applicable)\n\n" +
+      "A staff member will assist you shortly."
 )
 .setFooter({ text: "Support Team will be with you soon" })
 .setColor("#2b2d31")
