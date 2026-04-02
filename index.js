@@ -1441,7 +1441,7 @@ if (
 interaction.customId === "general_ticket" ||
 interaction.customId === "ia_ticket" ||
 interaction.customId === "mgmt_ticket" ||
-interaction.customId === "designer_ticket""
+interaction.customId === "designer_ticket"
 ) {
 
 const user = interaction.user;
