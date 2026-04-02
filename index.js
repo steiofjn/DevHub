@@ -298,12 +298,33 @@ if (accountAge < MIN_ACCOUNT_AGE_DAYS) {
   return;
 }
 
-  // ===== BOT JOIN LOG (NO KICK) =====
+  // ===== BOT JOIN =====
 if (member.user.bot) {
 
-  member.guild.channels.cache
-    .get(FULL_LOG_CHANNEL_ID)
-    ?.send(`🤖 Bot joined: ${member.user.tag}`);
+  const logChannel = member.guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
+
+  const embed = new EmbedBuilder()
+    .setTitle("🤖 Bot Joined")
+    .setDescription(`Bot: ${member}\nTag: ${member.user.tag}\n\nApprove or deny this bot.`)
+    .setColor("#ff9900")
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`bot_deny_${member.id}`)
+      .setLabel("Deny")
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId(`bot_confirm_${member.id}`)
+      .setLabel("Confirm")
+      .setStyle(ButtonStyle.Success)
+  );
+
+  logChannel?.send({
+    embeds: [embed],
+    components: [row]
+  });
 
   return;
 }
@@ -1242,6 +1263,55 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
 client.on("interactionCreate", async interaction => {
 
 if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
+
+// ===== BOT APPROVAL SYSTEM =====
+if (interaction.isButton()) {
+
+  const isMod = interaction.member.roles.cache.some(role =>
+    MOD_ROLE_ID.includes(role.id)
+  );
+
+  if (!isMod) {
+    return interaction.reply({
+      content: "❌ Only moderators can use this.",
+      ephemeral: true
+    });
+  }
+
+  const [action, type, userId] = interaction.customId.split("_");
+
+  if (action === "bot" && type === "deny") {
+
+    const member = await interaction.guild.members.fetch(userId).catch(() => null);
+
+    if (!member) {
+      return interaction.reply({ content: "Bot not found.", ephemeral: true });
+    }
+
+    await member.kick("Bot denied by moderator").catch(() => {});
+
+    await interaction.update({
+      content: `❌ Bot ${member.user.tag} was denied and kicked by ${interaction.user.tag}`,
+      embeds: [],
+      components: []
+    });
+  }
+
+  if (action === "bot" && type === "confirm") {
+
+    const member = await interaction.guild.members.fetch(userId).catch(() => null);
+
+    if (!member) {
+      return interaction.reply({ content: "Bot not found.", ephemeral: true });
+    }
+
+    await interaction.update({
+      content: `✅ Bot ${member.user.tag} was approved by ${interaction.user.tag}`,
+      embeds: [],
+      components: []
+    });
+  }
+}
 
 if (interaction.customId === "claim_ticket") {
 
