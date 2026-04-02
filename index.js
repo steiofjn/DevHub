@@ -8,6 +8,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   PermissionsBitField,
   ChannelType
 } = require('discord.js');
@@ -16,7 +17,7 @@ const fs = require("fs");
 
 // ===== CONFIG =====
 const TOKEN = process.env.TOKEN;
-const CLIENT_ID = "1489071517294792764";
+const CLIENT_ID = "1479938559036227614";
 const GUILD_ID = "1482878524841922630";
 
 
@@ -24,30 +25,31 @@ const GUILD_ID = "1482878524841922630";
 const UNVERIFIED_ROLE = "1487554862492156014";
 const VERIFIED_ROLES = [
   "1487552823683059762",
-  "1489285453185159208"
+  "PUT VERIFIED ROLE ID HERE"
 ];
 const VERIFY_CHANNEL_ID = "1487555154575360120";
 
 // ===== CHANNELS =====
-const FULL_LOG_CHANNEL_ID = "1489285934569750812";
-const BAN_LOG_CHANNEL = "1489285934569750812";
-const INVITE_LOG_CHANNEL = "1489285934569750812";
+const FULL_LOG_CHANNEL_ID = "1487555326713528494";
+const BAN_LOG_CHANNEL = "1487555326713528494";
+const INVITE_LOG_CHANNEL = "1487555326713528494";
 const MIN_ACCOUNT_AGE_DAYS = 3;
 
 // ===== ROLES =====
 const MOD_ROLE_ID = [
   "1487552685673812028",
-  "1489097900813189251",
-  "1487552709606248488"
+  "1487552709606248488",
+  "1487552730963902707",
+  "1482913822955274340"
 ];
 // The RAID COMMANDER is SSU/SSD (person who uses the /ssu command)
-const RAID_COMMANDER_ROLE_ID = "1371813199829012546";
-const RAID_PING_ROLE_ID = "1371813199829012546";
+const RAID_COMMANDER_ROLE_ID = "1487552685673812028";
+const RAID_PING_ROLE_ID = "1487552823683059762";
 
 // ===== TICKET SYSTEM =====
-const TICKET_PANEL_CHANNEL = "1371813201871638683";
-const TICKET_CATEGORY = "1407578496892534896";
-const TICKET_SUPPORT_ROLE = "1371813199829012546";
+const TICKET_PANEL_CHANNEL = "1487555705400463491";
+const TICKET_CATEGORY = "1487555806202171533";
+const TICKET_SUPPORT_ROLE = "1487555904390828052";
 
 // ===== RAID PREVENTION SYSTEM =====
 const RAID_JOIN_THRESHOLD = 5; // joins
@@ -144,42 +146,84 @@ client.once("ready", async () => {
   const panelChannel = await guild.channels.fetch(TICKET_PANEL_CHANNEL);
   if (!panelChannel) return;
 
+  const headerEmbed = new EmbedBuilder()
+.setColor("#2A5CFF")
+.setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1488900428417601677/resized_devhub_fixed.png?ex=69ce7614&is=69cd2494&hm=5ea1e8755a366e49e3d0ecc99657a0fc9626cd6e08f441853caf600d51d733dd");
+
   const ticketEmbed = new EmbedBuilder()
-  .setTitle("Open a ticket!")
-  .setDescription("Looking for help? You're in the right place. Open a ticket by pressing one of the buttons below. Please press the one necessary and not a random one.")
-  .setColor("#2b2d31")
-  .setImage("https://cdn.discordapp.com/attachments/1463950876640280739/1480289961633779904/ChatGPT_Image_Mar_8_2026_07_43_34_PM.png");
+.setColor("#2A5CFF")
+.setTitle("<:info2:1488904572498870533> Support Information")
+.setDescription(
+"> Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
 
+"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
+
+"<:chat:1488905927896596582> **General Support**\n" +
+"> <:CF11:1488888964755492944> General Inquires\n" +
+"> <:CF11:1488888964755492944> General Concerns\n" +
+"> <:CF11:1488888964755492944> Member Reports\n\n" +
+
+"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
+
+"<:IA:1488906883648458863> **IA Support**\n" +
+"> <:CF11:1488888964755492944> Staff Reports\n" +
+"> <:CF11:1488888964755492944> Scam Reports\n" +
+"> <:CF11:1488888964755492944> Refund Requests\n\n" +
+
+"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
+
+"<:mgmt:1488907498332356820> **Management Support**\n" +
+"> <:CF11:1488888964755492944> High Rank Inquires\n" +
+"> <:CF11:1488888964755492944> Partnership Requests\n" +
+"> <:CF11:1488888964755492944> Role Requests\n\n" +
+
+"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
+
+"**⚠️ Important**\n" + 
+  "> <:CF11:1488888964755492944> Do not spam tickets\n" + 
+  "> <:CF11:1488888964755492944> Provide detailed information\n" + 
+  "> <:CF11:1488888964755492944> Be patient while waiting\n\n" +
+
+"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n"
+
+)
+.setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1488908758263402556/image.png")
+.setFooter({ text: "Developer Hub • Support System" });
+  
   const row = new ActionRowBuilder().addComponents(
-
-  new ButtonBuilder()
-  .setCustomId("general_ticket")
-  .setLabel("General Support")
-  .setStyle(ButtonStyle.Primary)
-  .setEmoji({ id: "1480281879516283071" }),
-
-  new ButtonBuilder()
-  .setCustomId("ia_ticket")
-  .setLabel("Internal Affairs Support")
-  .setStyle(ButtonStyle.Danger)
-  .setEmoji({ id: "1480281879516283071" }),
-
-  new ButtonBuilder()
-  .setCustomId("mgmt_ticket")
-  .setLabel("Management Support")
-  .setStyle(ButtonStyle.Secondary)
-  .setEmoji({ id: "1480283687223427313" })
-
-  );
+  new StringSelectMenuBuilder()
+    .setCustomId("ticket_select")
+    .setPlaceholder("Select a ticket type...")
+    .addOptions([
+      {
+  label: "General Support",
+  description: "Questions, help, or general issues",
+  value: "general_ticket",
+  emoji: { id: "1488905927896596582" }
+},
+      {
+  label: "Internal Affairs",
+  description: "Report staff or serious concerns",
+  value: "ia_ticket",
+  emoji: { id: "1480281879516283071" }
+},
+      {
+  label: "Management",
+  description: "Contact high command",
+  value: "mgmt_ticket",
+  emoji: { id: "1480283687223427313" }
+}
+    ])
+);
 
   const messages = await panelChannel.messages.fetch({ limit: 10 });
 const existing = messages.find(m => m.author.id === client.user.id);
 
 if (!existing) {
   panelChannel.send({
-    embeds: [ticketEmbed],
-    components: [row]
-  });
+  embeds: [headerEmbed, ticketEmbed],
+  components: [row]
+});
 }
 
 });
@@ -792,7 +836,7 @@ if (interaction.commandName === "promote") {
     .setFooter({ text: `Promotion issued by ${interaction.user.tag}` })
     .setTimestamp();
 
-  const channel = interaction.guild.channels.cache.get("1406823138301448322");
+  const channel = interaction.guild.channels.cache.get("1487556202249588786");
 
   if (channel) {
     channel.send({
@@ -839,7 +883,7 @@ if (interaction.commandName === "demote") {
     .setFooter({ text: `Demoted by ${interaction.user.tag}` })
     .setTimestamp();
 
-  const channel = interaction.guild.channels.cache.get("1406823138301448322");
+  const channel = interaction.guild.channels.cache.get("1487556229202186442");
 
   if (channel) {
     channel.send({
@@ -930,7 +974,7 @@ if (interaction.commandName === "strike") {
     .setFooter({ text: `Strike issued by ${interaction.user.tag}` })
     .setTimestamp();
 
-  const channel = interaction.guild.channels.cache.get("1406823138301448322");
+  const channel = interaction.guild.channels.cache.get("1487556229202186442");
 
   if (channel) {
     channel.send({
@@ -1198,7 +1242,7 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 client.on("interactionCreate", async interaction => {
 
-if (!interaction.isButton()) return;
+if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
 
 if (interaction.customId === "claim_ticket") {
 
@@ -1244,12 +1288,19 @@ await interaction.deferUpdate();
   
 /* OPEN TICKET */
 
-if (interaction.customId === "general_ticket" || interaction.customId === "ia_ticket" || interaction.customId === "mgmt_ticket") {
+if (
+  (interaction.isStringSelectMenu() && interaction.customId === "ticket_select") ||
+  interaction.customId === "general_ticket" ||
+  interaction.customId === "ia_ticket" ||
+  interaction.customId === "mgmt_ticket"
+) {
 
 const user = interaction.user;
 const guild = interaction.guild;
 
-let type = interaction.customId.split("_")[0];
+let type = interaction.isStringSelectMenu()
+  ? interaction.values[0].split("_")[0]
+  : interaction.customId.split("_")[0];
 
 let name;
 let title;
@@ -1304,8 +1355,16 @@ PermissionsBitField.Flags.SendMessages
 
 const embed = new EmbedBuilder()
 .setTitle(title)
-.setDescription("Thank you very much for opening a support ticket, our amazing staff team will be with you as soon as they can! Please can you explain in as much detail as possible the problem you have?")
-.setColor("#2b2d31"); // Removed .setImage()
+.setDescription(
+"Thank you for opening a ticket!\n\n" +
+"**Please provide:**\n" +
+"• A detailed explanation of your issue\n" +
+"• Any screenshots (if applicable)\n\n" +
+" A staff member will assist you shortly."
+)
+.setFooter({ text: "Support Team will be with you soon" })
+.setColor("#2b2d31")
+.setTimestamp(); 
 
 const buttons = new ActionRowBuilder().addComponents(
 
@@ -1336,24 +1395,42 @@ ephemeral: true
 
 if (interaction.customId === "close_ticket") {
 
-if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-return interaction.reply({content:"❌ Only ticket staff can close tickets.",ephemeral:true});
+  if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE)) {
+    return interaction.reply({
+      content: "❌ Only ticket staff can close tickets.",
+      ephemeral: true
+    });
+  }
 
-const channel = interaction.channel;
+  const channel = interaction.channel;
 
-const userPerm = channel.permissionOverwrites.cache.find(
-p => p.type === 1 && p.id !== TICKET_SUPPORT_ROLE
-);
+  // Find the ticket owner (member overwrite that is NOT the support role)
+  const userOverwrite = channel.permissionOverwrites.cache.find(
+    o => o.type === 1 && o.id !== TICKET_SUPPORT_ROLE
+  );
 
-const userId = userPerm?.id;
+  const userId = userOverwrite?.id;
 
-try {
-const user = await client.users.fetch(userId);
+  try {
+    if (userId) {
+      const user = await client.users.fetch(userId);
 
-user.send("Your ticket was closed by Ticket Support. If you believe that this is wrong or you still needed to talk, please open another ticket in the server. Thank you.").catch(()=>{});
-} catch {}
+      await user.send(
+        "Your ticket was closed by Ticket Support. If you still need help, please open another ticket."
+      ).catch(() => {});
+    }
+  } catch (err) {
+    console.log("Failed to DM user:", err);
+  }
 
-channel.delete();
+  await interaction.reply({
+    content: "🗑️ Closing ticket...",
+    ephemeral: true
+  });
+
+  setTimeout(() => {
+    channel.delete().catch(() => {});
+  }, 2000);
 }
 
 });
