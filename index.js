@@ -148,7 +148,7 @@ client.once("ready", async () => {
 
   const headerEmbed = new EmbedBuilder()
 .setColor("#2A5CFF")
-.setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1488900428417601677/resized_devhub_fixed.png?ex=69ce7614&is=69cd2494&hm=5ea1e8755a366e49e3d0ecc99657a0fc9626cd6e08f441853caf600d51d733dd");
+.setImage("https://cdn.discordapp.com/attachments/1482878525286650048/1489298648322936872/SupportHeader.png");
 
   const ticketEmbed = new EmbedBuilder()
 .setColor("#2A5CFF")
