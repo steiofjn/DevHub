@@ -1440,6 +1440,9 @@ if (interaction.isButton() && interaction.customId.startsWith("app_")) {
     components: []
   });
 }
+  
+} // ✅ CLOSE app_ BLOCK PROPERLY
+
 // ===== BOT APPROVAL SYSTEM =====
 if (interaction.isButton()) {
 
