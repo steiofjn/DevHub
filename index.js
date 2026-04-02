@@ -65,13 +65,6 @@ const AUTO_LOCKDOWN_ON_NUKE = true;
 // ===== DATABASE =====
 const LOG_DB = "./playerlogs.json";
 
-// ===== DESIGNER APPLICATION SYSTEM =====
-const DESIGNER_CHANNEL_ID = "1489318230052049048";
-const DESIGNER_ROLE_ID = "1489098027477106960";
-
-// Tracks active applications
-const applications = new Map();
-
 // ===== STRIKE + LEVEL + RECRUIT DATABASES =====
 const STRIKE_DB = "./strikes.json";
 const LEVEL_DB = "./levels.json";
@@ -406,123 +399,6 @@ client.on("guildMemberRemove", member => {
       break;
     }
   }
-});
-
-// ===== DESIGNER APPLICATION SYSTEM (DM BASED) =====
-client.on("messageCreate", async (message) => {
-
-  if (message.author.bot) return;
-
-  // ONLY DMs
-  if (!message.guild) {
-
-    const userId = message.author.id;
-    const content = message.content.toLowerCase().trim();
-
-    let session = applications.get(userId);
-
-    // START APPLICATION
-    if (!session) {
-
-      if (content !== "apply") {
-        return message.channel.send("Type `apply` to start your application.");
-      }
-
-      session = {
-        step: "collecting_answers",
-        answers: [],
-        images: []
-      };
-
-      applications.set(userId, session);
-
-      const embed = new EmbedBuilder()
-        .setTitle("Designer Application")
-        .setDescription(
-          "Answer all questions, then type **done**.\n\n" +
-        "Q1 - What is your Roblox Username?\n" +
-        "Q2 - What do you focus on? (GFX, Clothing, etc)\n" +
-        "Q3 - How old are you?\n" +
-        "Q4 - What design tools do you use?\n" +
-        "Q5 - Do you have any previous experience designing for Roblox groups or communities? If yes, explain.\n" +
-        "Q6 - How would you handle a request from a client that you disagree with or find difficult?\n" +
-        "Q7 - How do you ensure your designs are high quality and meet requirements?\n" +
-        "Q8 - Are you able to meet deadlines and work under pressure? Explain your approach.\n" +
-        "Q9 - How do you handle feedback or criticism on your designs?\n" +
-        "Q10 - Is there anything else we should know about you or your design experience?\n\n" +
-          "After answering, type **done** and send your work images."
-        )
-        .setColor("#2A5CFF");
-
-      return message.channel.send({ embeds: [embed] });
-    }
-
-    // ===== COLLECT ANSWERS =====
-    if (session.step === "collecting_answers") {
-
-      if (content === "done") {
-        session.step = "awaiting_images";
-        applications.set(userId, session);
-
-        return message.channel.send("Now send your images, then type `submit`.");
-      }
-
-      session.answers.push(message.content);
-      applications.set(userId, session);
-      return;
-    }
-
-    // ===== IMAGE + SUBMIT =====
-    if (session.step === "awaiting_images") {
-
-      if (message.attachments.size > 0) {
-        const urls = Array.from(message.attachments.values()).map(a => a.url);
-        session.images.push(...urls);
-      }
-
-      if (content === "submit") {
-
-        const channel = await client.channels.fetch(DESIGNER_CHANNEL_ID).catch(() => null);
-
-        if (!channel) {
-          applications.delete(userId);
-          return message.channel.send("Application channel not found.");
-        }
-
-        const embed = new EmbedBuilder()
-          .setTitle(`Application - ${message.author.tag}`)
-          .setDescription(
-            session.answers.map((a, i) => `**Q${i+1}:** ${a}`).join("\n\n")
-          )
-          .setColor("#2A5CFF");
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`app_approve_${userId}`)
-            .setLabel("Approve")
-            .setStyle(ButtonStyle.Success),
-          new ButtonBuilder()
-            .setCustomId(`app_deny_${userId}`)
-            .setLabel("Deny")
-            .setStyle(ButtonStyle.Danger)
-        );
-
-        await channel.send({ embeds: [embed], components: [row] });
-
-        for (const img of session.images) {
-          await channel.send({ content: img });
-        }
-
-        applications.delete(userId);
-
-        return message.channel.send("✅ Application submitted!");
-      }
-
-      return message.channel.send("Send images, then type `submit`.");
-    }
-
-  }
-
 });
 
 // ===== AUTOMOD (UPDATED - NO BYPASS) =====
