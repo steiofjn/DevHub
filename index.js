@@ -236,12 +236,10 @@ const row = new ActionRowBuilder().addComponents(
   const messages = await panelChannel.messages.fetch({ limit: 10 });
 const existing = messages.find(m => m.author.id === client.user.id);
 
-if (!existing) {
-  panelChannel.send({
+await panelChannel.send({
   embeds: [headerEmbed, ticketEmbed],
   components: [row]
 });
-}
 
 });
 
@@ -1447,31 +1445,35 @@ interaction.customId === "designer_ticket"
 const user = interaction.user;
 const guild = interaction.guild;
 
-let type = interaction.isStringSelectMenu()
-  ? interaction.values[0].split("_")[0]
-  : interaction.customId.split("_")[0];
+let type;
+
+if (interaction.isStringSelectMenu()) {
+  type = interaction.values[0];
+} else {
+  type = interaction.customId;
+}
 
 let name;
 let title;
 
 const cleanName = user.username.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-if (type === "general") {
+if (type === "general_ticket") {
 name = `🔴-general-${cleanName}`;
 title = "General Support";
 }
 
-if (type === "ia") {
+if (type === "ia_ticket") {
 name = `🔴-ia-${cleanName}`;
 title = "Internal Affairs Support";
 }
 
-if (type === "mgmt") {
+if (type === "mgmt_ticket") {
 name = `🔴-mgmt-${cleanName}`;
 title = "Management Support";
 }
 
-if (type === "designer") {
+if (type === "designer_ticket") {
   name = `🔴-designer-${cleanName}`;
   title = "Designer Application";
 }
@@ -1510,7 +1512,7 @@ PermissionsBitField.Flags.SendMessages
 const embed = new EmbedBuilder()
 .setTitle(title)
 .setDescription(
-  type === "designer"
+  type === "designer_ticket"
     ? "Thank you for opening an application! Please answer the following questions and send any images you have that can showcase your previous work."
     : "Thank you for opening a ticket!\n\n" +
       "**Please provide:**\n" +
@@ -1524,7 +1526,7 @@ const embed = new EmbedBuilder()
       "<:CF11:1488888964755492944> Q8 - Are you able to meet deadlines and work under pressure? Explain your approach.\n"  +
       "<:CF11:1488888964755492944> Q9 - How do you handle feedback or criticism on your designs?\n"  +
       "<:CF11:1488888964755492944> Q10 - Is there anything else we should know about you or your design experience?\n"  +
-      "<:CF11:1488888964755492944> Any screenshots (if applicable)\n\n" +
+      "<:CF11:1488888964755492944> Any screenshots/past experience (if applicable)\n\n" 
       "A staff member will assist you shortly."
 )
 .setFooter({ text: "Support Team will be with you soon" })
