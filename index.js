@@ -64,6 +64,14 @@ const AUTO_LOCKDOWN_ON_NUKE = true;
 
 // ===== DATABASE =====
 const LOG_DB = "./playerlogs.json";
+
+// ===== DESIGNER APPLICATION SYSTEM =====
+const DESIGNER_CHANNEL_ID = "1489318230052049048";
+const DESIGNER_ROLE_ID = "1489098027477106960";
+
+// Tracks active applications
+const applications = new Map();
+
 // ===== STRIKE + LEVEL + RECRUIT DATABASES =====
 const STRIKE_DB = "./strikes.json";
 const LEVEL_DB = "./levels.json";
@@ -394,6 +402,133 @@ client.on("guildMemberRemove", member => {
         ?.send(`📉 Invite removed from <@${inviterId}> (user left)`);
 
       break;
+    }
+  }
+});
+
+// --- MSG CREATE APPLY ---
+
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+  if (message.guild) return; // ONLY DMs
+
+  const userId = message.author.id;
+  const content = message.content.toLowerCase();
+
+  let session = applications.get(userId);
+
+  // ===== STEP 1: APPLY =====
+  if (content === "apply") {
+
+    applications.set(userId, {
+      step: "awaiting_ready",
+      answers: [],
+      images: []
+    });
+
+    const embed = new EmbedBuilder()
+      .setTitle("Designer Application")
+      .setDescription(
+        "Thank you for taking your time to apply for our designer application! Please answer the following questions in this personal message and they will be forwarded to our applications team. Without further ado lets begin.\n\n" +
+        "Q1 - What is your Roblox Username?\n" +
+        "Q2 - What do you focus on? (GFX, Clothing, etc)\n" +
+        "Q3 - How old are you?\n" +
+        "Q4 - What design tools do you use?\n" +
+        "Q5 - Do you have any previous experience designing for Roblox groups or communities? If yes, explain.\n" +
+        "Q6 - How would you handle a request from a client that you disagree with or find difficult?\n" +
+        "Q7 - How do you ensure your designs are high quality and meet requirements?\n" +
+        "Q8 - Are you able to meet deadlines and work under pressure? Explain your approach.\n" +
+        "Q9 - How do you handle feedback or criticism on your designs?\n" +
+        "Q10 - Is there anything else we should know about you or your design experience?\n\n" +
+        '***Once you are finished answering these questions please say "done" and we will continue with the application***'
+      )
+      .setColor("#2A5CFF");
+
+    return message.channel.send({ embeds: [embed] });
+  }
+
+  if (!session) return;
+
+  // ===== STEP 2: READY (user types "ready") =====
+  if (content === "ready" && session.step === "awaiting_ready") {
+
+    session.step = "collecting_answers";
+
+    const embed = new EmbedBuilder()
+      .setTitle("Designer Application")
+      .setDescription("Please begin answering the questions in order. When finished, type **done**.")
+      .setColor("#2A5CFF");
+
+    return message.channel.send({ embeds: [embed] });
+  }
+
+  // ===== COLLECT ANSWERS =====
+  if (session.step === "collecting_answers") {
+
+    if (content === "done") {
+      session.step = "awaiting_images";
+
+      const embed = new EmbedBuilder()
+        .setTitle("Almost there!")
+        .setDescription("Please finish by providing images on your previous work.")
+        .setColor("#2A5CFF");
+
+      return message.channel.send({ embeds: [embed] });
+    }
+
+    session.answers.push(message.content);
+    applications.set(userId, session);
+  }
+
+  // ===== IMAGE COLLECTION + FINAL SUBMISSION =====
+  if (session.step === "awaiting_images") {
+
+    if (message.attachments.size > 0) {
+      session.images.push(...message.attachments.map(a => a.url));
+    }
+
+    if (session.images.length > 0) {
+
+      const channel = await client.channels.fetch(DESIGNER_CHANNEL_ID);
+
+      // EMBED WITH QUESTIONS + ANSWERS
+      const embed = new EmbedBuilder()
+        .setTitle(`Designer Application - ${message.author.tag}`)
+        .setColor("#2A5CFF")
+        .setDescription(
+          session.answers.map((a, i) => `**Q${i + 1}:** ${a}`).join("\n\n")
+        )
+        .setTimestamp();
+
+      // BUTTONS
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`app_approve_${userId}`)
+          .setLabel("Approve")
+          .setStyle(ButtonStyle.Success),
+
+        new ButtonBuilder()
+          .setCustomId(`app_deny_${userId}`)
+          .setLabel("Deny")
+          .setStyle(ButtonStyle.Danger)
+      );
+
+      await channel.send({
+        embeds: [embed],
+        components: [row]
+      });
+
+      // IMAGES MESSAGE
+      await channel.send({
+        content: `**Images from ${message.author.tag}:**\n` + session.images.join("\n")
+      });
+
+      // FINAL DM MESSAGE
+      await message.channel.send(
+        "Thank you for providing those images your application will now be forwarded to the applications team where they will review and discuss your application."
+      );
+
+      applications.delete(userId);
     }
   }
 });
@@ -1263,6 +1398,56 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
 client.on("interactionCreate", async interaction => {
 
 if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
+
+// ===== DESIGNER APPLICATION APPROVE/DENY =====
+if (interaction.isButton() && interaction.customId.startsWith("app_")) {
+
+  const isMod = interaction.member.roles.cache.some(role =>
+    MOD_ROLE_ID.includes(role.id)
+  );
+
+  if (!isMod) {
+    return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  }
+
+  const parts = interaction.customId.split("_");
+  const action = parts[1];
+  const userId = parts[2];
+
+  const member = await interaction.guild.members.fetch(userId).catch(() => null);
+
+  if (!member) {
+    return interaction.reply({ content: "User not found.", ephemeral: true });
+  }
+
+  // APPROVE
+  if (action === "approve") {
+
+    await member.roles.add(DESIGNER_ROLE_ID).catch(() => {});
+
+    await member.send(
+      "Congratulations of passing the Designer Application! Welcome to our team and we cant wait for you to start. You can view all information in the staff channel and if you have any questions ask a Senior Designer or the Lead Designer."
+    ).catch(() => {});
+
+    return interaction.update({
+      content: `✅ Approved by ${interaction.user.tag}`,
+      components: []
+    });
+  }
+
+  // DENY
+  if (action === "deny") {
+
+    await member.send(
+      "Unfortunately you have not been selected to join the Designer Team. You can re-apply in 72 hours if you would like."
+    ).catch(() => {});
+
+    return interaction.update({
+      content: `❌ Denied by ${interaction.user.tag}`,
+      components: []
+    });
+  }
+}
 
 // ===== BOT APPROVAL SYSTEM =====
 if (interaction.isButton()) {
