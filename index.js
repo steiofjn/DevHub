@@ -1436,11 +1436,9 @@ await interaction.deferUpdate();
 
 if (
   (interaction.isStringSelectMenu() && interaction.customId === "ticket_select") ||
-interaction.customId === "general_ticket" ||
-interaction.customId === "ia_ticket" ||
-interaction.customId === "mgmt_ticket" ||
-interaction.customId === "designer_ticket"
-) {
+  (interaction.isButton() && interaction.customId.endsWith("_ticket"))
+)
+{
 
 const user = interaction.user;
 const guild = interaction.guild;
@@ -1513,25 +1511,15 @@ const embed = new EmbedBuilder()
 .setTitle(title)
 .setDescription(
   type === "designer_ticket"
-    ? "Thank you for opening an application! Please answer the following questions and send any images you have that can showcase your previous work."
-    : "Thank you for opening a ticket!\n\n" +
+    ? "Thank you for opening an application! Please answer the following questions and send any images that showcase your previous work."
+    : "Thank you for opening a ticket! A applications team member will be with you shortly to provide the full list of questions.\n\n" +
       "**Please provide:**\n" +
-      "<:CF11:1488888964755492944> Q1 - What is your Roblox Username?\n"  +
-      "<:CF11:1488888964755492944> Q2 - What do you focus on? GFX, Clothing, etc\n"  +
-      "<:CF11:1488888964755492944> Q3 - How old are you?\n"  +
-      "<:CF11:1488888964755492944> Q4 - What design tools do you use? Photpea, Photoshop, etc\n"  +
-      "<:CF11:1488888964755492944> Q5 - Do you have any previous experience designing for Roblox groups or communities? If yes, explain.\n"  +
-      "<:CF11:1488888964755492944> Q6 - How would you handle a request from a client that you disagree with or find difficult?\n"  +
-      "<:CF11:1488888964755492944> Q7 - How do you ensure your designs are high quality and meet requirements?\n"  +
-      "<:CF11:1488888964755492944> Q8 - Are you able to meet deadlines and work under pressure? Explain your approach.\n"  +
-      "<:CF11:1488888964755492944> Q9 - How do you handle feedback or criticism on your designs?\n"  +
-      "<:CF11:1488888964755492944> Q10 - Is there anything else we should know about you or your design experience?\n"  +
-      "<:CF11:1488888964755492944> Any screenshots/past experience (if applicable)\n\n" 
-      "A staff member will assist you shortly."
+      "<:CF11:1488888964755492944> Q1 - What is your Roblox Username?\n" +
+      "<:CF11:1488888964755492944> Q2 - What is your main skill? GFX, Liveries, etc.\n" +
+      "<:CF11:1488888964755492944> Q3 - Please provide a portfolio or images of previous work.\n"
 )
-.setFooter({ text: "Support Team will be with you soon" })
-.setColor("#2b2d31")
-.setTimestamp(); 
+.setColor("#2A5CFF")
+.setTimestamp();
 
 const buttons = new ActionRowBuilder().addComponents(
 
