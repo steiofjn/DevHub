@@ -17,7 +17,7 @@ const fs = require("fs");
 // ===== CONFIG =====
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = "1489071517294792764";
-const GUILD_ID = "1371813199606714508";
+const GUILD_ID = "1482878524841922630";
 
 
 // ===== VERIFY SYSTEM =====
