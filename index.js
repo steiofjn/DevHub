@@ -372,6 +372,15 @@ if (usedInvite && usedInvite.inviter) {
   }
 }
 
+// ===== WELCOME MESSAGE =====
+const welcomeChannel = member.guild.channels.cache.get("1482878525286650048");
+
+if (welcomeChannel) {
+  welcomeChannel.send(
+    `Welcome ${member} to DevHub! We now have ${member.guild.memberCount} members.`
+  );
+}
+
 // Update cache
 inviteCache.set(member.guild.id, newInvites);
 });
