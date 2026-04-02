@@ -837,7 +837,7 @@ if (interaction.commandName === "promote") {
     .setFooter({ text: `Promotion issued by ${interaction.user.tag}` })
     .setTimestamp();
 
-  const channel = interaction.guild.channels.cache.get("1487556202249588786");
+  const channel = interaction.guild.channels.cache.get("1489097136929902624");
 
   if (channel) {
     channel.send({
@@ -884,7 +884,7 @@ if (interaction.commandName === "demote") {
     .setFooter({ text: `Demoted by ${interaction.user.tag}` })
     .setTimestamp();
 
-  const channel = interaction.guild.channels.cache.get("1487556229202186442");
+  const channel = interaction.guild.channels.cache.get("1489097083029033060");
 
   if (channel) {
     channel.send({
@@ -975,7 +975,7 @@ if (interaction.commandName === "strike") {
     .setFooter({ text: `Strike issued by ${interaction.user.tag}` })
     .setTimestamp();
 
-  const channel = interaction.guild.channels.cache.get("1487556229202186442");
+  const channel = interaction.guild.channels.cache.get("1489097083029033060");
 
   if (channel) {
     channel.send({
