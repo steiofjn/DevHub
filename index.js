@@ -195,8 +195,6 @@ client.once("ready", async () => {
   "> <:CF11:1488888964755492944> Provide detailed information\n" + 
   "> <:CF11:1488888964755492944> Be patient while waiting\n\n" +
 
-"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n"
-
 )
 .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1488908758263402556/image.png")
 .setFooter({ text: "Developer Hub • Support System" });
@@ -236,12 +234,12 @@ const row = new ActionRowBuilder().addComponents(
   const messages = await panelChannel.messages.fetch({ limit: 10 });
 const existing = messages.find(m => m.author.id === client.user.id);
 
-await panelChannel.send({
-  embeds: [headerEmbed, ticketEmbed],
-  components: [row]
-});
-
-});
+if (!existing) {
+  await panelChannel.send({
+    embeds: [headerEmbed, ticketEmbed],
+    components: [row]
+  });
+}
 
 // ===== ANTI RAID + AUTO ROLES =====
 let recentJoins = [];
@@ -1340,7 +1338,7 @@ if (interaction.isButton() && interaction.customId.startsWith("app_")) {
 } // ✅ CLOSE app_ BLOCK PROPERLY
 
 // ===== BOT APPROVAL SYSTEM =====
-if (interaction.isButton()) {
+if (interaction.isButton() && interaction.customId.startsWith("bot_")) {
 
   const isMod = interaction.member.roles.cache.some(role =>
     MOD_ROLE_ID.includes(role.id)
