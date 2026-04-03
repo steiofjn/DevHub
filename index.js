@@ -1329,10 +1329,12 @@ if (interaction.isButton() && interaction.customId.startsWith("app_")) {
   }
 
   return interaction.update({
-    content: `❌ Denied by ${interaction.user.tag}`,
-    components: []
+      content: `❌ Denied by ${interaction.user.tag}`,
+      components: []
+    });
   }
-  });
+
+} // closes app_ block
 
 // ===== BOT APPROVAL SYSTEM =====
 if (interaction.isButton() && interaction.customId.startsWith("bot_")) {
