@@ -1331,10 +1331,8 @@ if (interaction.isButton() && interaction.customId.startsWith("app_")) {
   return interaction.update({
     content: `❌ Denied by ${interaction.user.tag}`,
     components: []
+  }
   });
-}
-  
-} // ✅ CLOSE app_ BLOCK PROPERLY
 
 // ===== BOT APPROVAL SYSTEM =====
 if (interaction.isButton() && interaction.customId.startsWith("bot_")) {
