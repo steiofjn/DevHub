@@ -654,7 +654,23 @@ new SlashCommandBuilder()
 
 new SlashCommandBuilder()
   .setName('unlockdown')
-  .setDescription('Unlock the server')
+  .setDescription('Unlock the server'),
+
+  new SlashCommandBuilder()
+  .setName('claim')
+  .setDescription('Claim a ticket'),
+
+new SlashCommandBuilder()
+  .setName('close')
+  .setDescription('Close a ticket')
+  .addStringOption(o =>
+    o.setName('reason')
+    .setDescription('Reason for closing')
+    .setRequired(true)),
+
+new SlashCommandBuilder()
+  .setName('closereq')
+  .setDescription('Ask the user if they want to close the ticket')
 
 ];
 
@@ -1260,6 +1276,92 @@ setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
     });
   }
 
+// CLAIM COMMAND LOGIC
+  if (interaction.commandName === "claim") {
+
+    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
+      return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
+
+    const embed = new EmbedBuilder()
+      .setTitle("Ticket Claimed")
+      .setDescription(`${interaction.user} has claimed this ticket. If you need anything you can ask them.`)
+      .setColor("#2A5CFF")
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+  }
+
+  // CLOSE
+  if (interaction.commandName === "close") {
+
+    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
+      return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
+
+    const reason = interaction.options.getString("reason");
+    const channel = interaction.channel;
+    const channelName = channel.name;
+
+    // Fetch last 100 messages
+    const fetched = await channel.messages.fetch({ limit: 100 });
+    const transcript = fetched
+      .reverse()
+      .map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`)
+      .join("\n");
+
+    // Determine ticket type from channel name
+    let ticketType = "Ticket";
+    if (channelName.includes("general")) ticketType = "General Support";
+    else if (channelName.includes("ia")) ticketType = "Internal Affairs";
+    else if (channelName.includes("mgmt")) ticketType = "Management Support";
+    else if (channelName.includes("designer")) ticketType = "Designer Application";
+
+    // Find who opened the ticket by finding the first non-bot message
+    const opener = fetched.last()?.author ?? interaction.user;
+
+    const transcriptEmbed = new EmbedBuilder()
+      .setTitle(`${ticketType} - ${opener.tag}`)
+      .setDescription(
+        `**Closed by:** ${interaction.user}\n**Reason:** ${reason}\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``
+      )
+      .setColor("#2A5CFF")
+      .setTimestamp();
+
+    const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
+    if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
+
+    await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
+
+    setTimeout(() => {
+      channel.delete().catch(() => {});
+    }, 2000);
+  }
+
+  // CLOSE REQUEST
+  if (interaction.commandName === "closereq") {
+
+    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
+      return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
+
+    const embed = new EmbedBuilder()
+      .setTitle("Close Request")
+      .setDescription("The ticket support would like to know whether or not you want to close the ticket.")
+      .setColor("#2A5CFF")
+      .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`closereq_yes_${interaction.user.id}`)
+        .setLabel("Yes")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`closereq_no_${interaction.user.id}`)
+        .setLabel("No")
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    await interaction.reply({ embeds: [embed], components: [row] });
+  }
+  
 });
 
 // ===== REGISTER SLASH COMMANDS =====
@@ -1427,7 +1529,10 @@ if (interaction.customId === "claim_ticket") {
 
 if (
   (interaction.isStringSelectMenu() && interaction.customId === "ticket_select") ||
-  (interaction.isButton() && interaction.customId.endsWith("_ticket"))
+  interaction.customId === "general_ticket" ||
+  interaction.customId === "ia_ticket" ||
+  interaction.customId === "mgmt_ticket" ||
+  interaction.customId === "designer_ticket"
 )
 {
 
@@ -1557,15 +1662,60 @@ if (interaction.customId === "close_ticket") {
   }
 
   const channel = interaction.channel;
+  const channelName = channel.name;
 
-  await interaction.reply({
-    content: "🗑️ Closing ticket...",
-    ephemeral: true
-  });
+  const fetched = await channel.messages.fetch({ limit: 100 });
+  const transcript = fetched
+    .reverse()
+    .map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`)
+    .join("\n");
+
+  let ticketType = "Ticket";
+  if (channelName.includes("general")) ticketType = "General Support";
+  else if (channelName.includes("ia")) ticketType = "Internal Affairs";
+  else if (channelName.includes("mgmt")) ticketType = "Management Support";
+  else if (channelName.includes("designer")) ticketType = "Designer Application";
+
+  const opener = fetched.last()?.author ?? interaction.user;
+
+  const transcriptEmbed = new EmbedBuilder()
+    .setTitle(`${ticketType} - ${opener.tag}`)
+    .setDescription(
+      `**Closed by:** ${interaction.user}\n**Reason:** Button close\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``
+    )
+    .setColor("#2A5CFF")
+    .setTimestamp();
+
+  const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
+  if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
+
+  await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
 
   setTimeout(() => {
     channel.delete().catch(() => {});
   }, 2000);
+}
+
+// CLOSE REQUEST BUTTONS
+if (interaction.isButton() && interaction.customId.startsWith("closereq_")) {
+
+  const parts = interaction.customId.split("_");
+  const answer = parts[1];
+  const staffId = parts[2];
+
+  if (answer === "yes") {
+    await interaction.update({ components: [] });
+    await interaction.channel.send(
+      `<@${staffId}> ${interaction.user.username} has chosen to close this ticket. Please proceed.`
+    );
+  }
+
+  if (answer === "no") {
+    await interaction.update({ components: [] });
+    await interaction.channel.send(
+      `<@${staffId}> ${interaction.user.username} has chosen to continue in the ticket.`
+    );
+  }
 }
 
 });
