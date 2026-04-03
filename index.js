@@ -193,8 +193,8 @@ client.once("ready", async () => {
 "**⚠️ Important**\n" + 
   "> <:CF11:1488888964755492944> Do not spam tickets\n" + 
   "> <:CF11:1488888964755492944> Provide detailed information\n" + 
-  "> <:CF11:1488888964755492944> Be patient while waiting\n\n" +
-
+  "> <:CF11:1488888964755492944> Be patient while waiting\n\n"
+)
 .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1488908758263402556/image.png")
 .setFooter({ text: "Developer Hub • Support System" });
   
