@@ -1498,17 +1498,25 @@ PermissionsBitField.Flags.SendMessages
 ]
 });
 
+let ticketDescription;
+
+if (type === "designer_ticket") {
+  ticketDescription = "Thank you for opening an application! Please answer the following questions and send any images that showcase your previous work.\n\n" +
+    "**Please provide:**\n" +
+    "<:CF11:1488888964755492944> Q1 - What is your Roblox Username?\n" +
+    "<:CF11:1488888964755492944> Q2 - What is your main skill? GFX, Liveries, etc.\n" +
+    "<:CF11:1488888964755492944> Q3 - Please provide a portfolio or images of previous work.\n";
+} else if (type === "mgmt_ticket") {
+  ticketDescription = "Thank you for opening a ticket, a HR member will be with you shortly. Please explain why you opened the ticket while waiting.";
+} else if (type === "ia_ticket") {
+  ticketDescription = "Thank you for opening a ticket, a IA member will be with you shortly. Please explain why you opened the ticket while waiting.";
+} else if (type === "general_ticket") {
+  ticketDescription = "Thank you for opening a ticket, a staff member will be with you shortly. If you could provide the reason why you opened it while waiting that would be great, thanks.";
+}
+
 const embed = new EmbedBuilder()
 .setTitle(title)
-.setDescription(
-  type === "designer_ticket"
-    ? "Thank you for opening an application! Please answer the following questions and send any images that showcase your previous work."
-    : "Thank you for opening a ticket! A applications team member will be with you shortly to provide the full list of questions.\n\n" +
-      "**Please provide:**\n" +
-      "<:CF11:1488888964755492944> Q1 - What is your Roblox Username?\n" +
-      "<:CF11:1488888964755492944> Q2 - What is your main skill? GFX, Liveries, etc.\n" +
-      "<:CF11:1488888964755492944> Q3 - Please provide a portfolio or images of previous work.\n"
-)
+.setDescription(ticketDescription)
 .setColor("#2A5CFF")
 .setTimestamp();
 
