@@ -20,7 +20,6 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = "1489071517294792764";
 const GUILD_ID = "1482878524841922630";
 
-
 // ===== VERIFY SYSTEM =====
 const UNVERIFIED_ROLE = "1487554862492156014";
 const VERIFIED_ROLES = [
@@ -33,7 +32,8 @@ const VERIFY_CHANNEL_ID = "1487555154575360120";
 const FULL_LOG_CHANNEL_ID = "1487555326713528494";
 const BAN_LOG_CHANNEL = "1487555326713528494";
 const INVITE_LOG_CHANNEL = "1487555326713528494";
-const MIN_ACCOUNT_AGE_DAYS = 3;
+const APPLICATION_LOG_CHANNEL = "1489705795594490068";
+const MIN_ACCOUNT_AGE_DAYS = 7;
 
 // ===== ROLES =====
 const MOD_ROLE_ID = [
@@ -42,83 +42,55 @@ const MOD_ROLE_ID = [
   "1487552730963902707",
   "1482913822955274340"
 ];
-// The RAID COMMANDER is SSU/SSD (person who uses the /ssu command)
-const RAID_COMMANDER_ROLE_ID = "1487552685673812028";
-const RAID_PING_ROLE_ID = "1487552823683059762";
+const DESIGNER_ROLE_ID = "1489098027477106960";
 
 // ===== TICKET SYSTEM =====
 const TICKET_PANEL_CHANNEL = "1487555705400463491";
 const TICKET_CATEGORY = "1487555806202171533";
 const TICKET_SUPPORT_ROLE = "1487555904390828052";
 
-// ===== RAID PREVENTION SYSTEM =====
-const RAID_JOIN_THRESHOLD = 5; // joins
-const RAID_TIME_WINDOW = 10000; // ms
+// ===== RAID PREVENTION =====
+const RAID_JOIN_THRESHOLD = 5;
+const RAID_TIME_WINDOW = 10000;
 const AUTO_LOCKDOWN = true;
 
-// ===== ANTI NUKE SYSTEM =====
-const NUKER_THRESHOLD = 3; // actions before punishment
-const NUKER_TIME_WINDOW = 10000; // 10 seconds
+// ===== ANTI NUKE =====
+const NUKER_THRESHOLD = 3;
+const NUKER_TIME_WINDOW = 10000;
 const AUTO_BAN_NUKERS = true;
 const AUTO_LOCKDOWN_ON_NUKE = true;
 
-// ===== DATABASE =====
-const LOG_DB = "./playerlogs.json";
+// ===== AUTOMOD CONFIG =====
+const MASS_MENTION_LIMIT = 5;
+const EMOJI_SPAM_LIMIT = 10;
+const WHITELISTED_LINKS = ["discord.com", "tenor.com", "imgur.com"];
+const NEW_MEMBER_DAYS = 7;
 
-// ===== STRIKE + LEVEL + RECRUIT DATABASES =====
+// ===== DATABASES =====
+const LOG_DB = "./playerlogs.json";
 const STRIKE_DB = "./strikes.json";
 const LEVEL_DB = "./levels.json";
 const INVITE_DB = "./invites.json";
 
-let strikeData = fs.existsSync(STRIKE_DB)
-  ? JSON.parse(fs.readFileSync(STRIKE_DB))
-  : {};
+let strikeData = fs.existsSync(STRIKE_DB) ? JSON.parse(fs.readFileSync(STRIKE_DB)) : {};
+let levelData = fs.existsSync(LEVEL_DB) ? JSON.parse(fs.readFileSync(LEVEL_DB)) : {};
+let inviteData = fs.existsSync(INVITE_DB) ? JSON.parse(fs.readFileSync(INVITE_DB)) : {};
+let playerLogs = fs.existsSync(LOG_DB) ? JSON.parse(fs.readFileSync(LOG_DB)) : {};
 
-let levelData = fs.existsSync(LEVEL_DB)
-  ? JSON.parse(fs.readFileSync(LEVEL_DB))
-  : {};
-
-let inviteData = fs.existsSync(INVITE_DB)
-  ? JSON.parse(fs.readFileSync(INVITE_DB))
-  : {};
-
-function saveStrikes() {
-  fs.writeFileSync(STRIKE_DB, JSON.stringify(strikeData, null, 2));
-}
-
-function saveLevels() {
-  fs.writeFileSync(LEVEL_DB, JSON.stringify(levelData, null, 2));
-}
-
-function saveInvites() {
-  fs.writeFileSync(INVITE_DB, JSON.stringify(inviteData, null, 2));
-}
-
-// ===== RANK ORDER (TOP → BOTTOM FIELD LEADERSHIP ONLY) =====
-
-let playerLogs = fs.existsSync(LOG_DB)
-  ? JSON.parse(fs.readFileSync(LOG_DB))
-  : {};
-
-function saveLogs() {
-  fs.writeFileSync(LOG_DB, JSON.stringify(playerLogs, null, 2));
-}
+function saveStrikes() { fs.writeFileSync(STRIKE_DB, JSON.stringify(strikeData, null, 2)); }
+function saveLevels() { fs.writeFileSync(LEVEL_DB, JSON.stringify(levelData, null, 2)); }
+function saveInvites() { fs.writeFileSync(INVITE_DB, JSON.stringify(inviteData, null, 2)); }
+function saveLogs() { fs.writeFileSync(LOG_DB, JSON.stringify(playerLogs, null, 2)); }
 
 function addLog(userId, type, moderator, reason) {
   if (!playerLogs[userId]) playerLogs[userId] = [];
-
-  playerLogs[userId].push({
-    type,
-    moderator,
-    reason,
-    date: new Date().toLocaleString()
-  });
-
+  playerLogs[userId].push({ type, moderator, reason, date: new Date().toLocaleString() });
   saveLogs();
 }
 
-// ===== SESSION MESSAGE TRACKING =====
-let lastSSUMessage = null;
+// ===== APPLICATION SESSION TRACKING =====
+// state: "instructions" | "awaiting_answers" | "awaiting_images"
+const applicationSessions = new Map();
 
 // ===== CLIENT =====
 const client = new Client({
@@ -127,18 +99,17 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildModeration
   ],
-  partials: ["CHANNEL"]
+  partials: ["CHANNEL", "MESSAGE"]
 });
 
-// ===== INVITE CACHE SYSTEM =====
+// ===== INVITE CACHE =====
 let inviteCache = new Map();
 
 client.once("ready", async () => {
-
   console.log(`✅ Logged in as ${client.user.tag}`);
-  console.log(`Ticket system ready`);
 
   const guild = client.guilds.cache.get(GUILD_ID);
   if (!guild) return;
@@ -150,97 +121,56 @@ client.once("ready", async () => {
   if (!panelChannel) return;
 
   const headerEmbed = new EmbedBuilder()
-.setColor("#2A5CFF")
-.setImage("https://cdn.discordapp.com/attachments/1489096700793716817/1489307015787577495/New_Project_6.png");
+    .setColor("#2A5CFF")
+    .setImage("https://cdn.discordapp.com/attachments/1489096700793716817/1489307015787577495/New_Project_6.png");
 
   const ticketEmbed = new EmbedBuilder()
-.setColor("#2A5CFF")
-.setTitle("<:info2:1488904572498870533> Support Information")
-.setDescription(
-"> Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
+    .setColor("#2A5CFF")
+    .setTitle("<:info2:1488904572498870533> Support Information")
+    .setDescription(
+      "> Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
+      "<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
+      "<:chat:1488905927896596582> **General Support**\n" +
+      "> <:CF11:1488888964755492944> General Inquires\n" +
+      "> <:CF11:1488888964755492944> General Concerns\n" +
+      "> <:CF11:1488888964755492944> Member Reports\n\n" +
+      "<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
+      "<:IA:1488906883648458863> **IA Support**\n" +
+      "> <:CF11:1488888964755492944> Staff Reports\n" +
+      "> <:CF11:1488888964755492944> Scam Reports\n" +
+      "> <:CF11:1488888964755492944> LOA Requests\n" +
+      "> <:CF11:1488888964755492944> Refund Requests\n\n" +
+      "<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
+      "<:mgmt:1488907498332356820> **Management Support**\n" +
+      "> <:CF11:1488888964755492944> High Rank Inquires\n" +
+      "> <:CF11:1488888964755492944> Partnership Requests\n" +
+      "> <:CF11:1488888964755492944> Role Requests\n\n" +
+      "<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
+      "**⚠️ Important**\n" +
+      "> <:CF11:1488888964755492944> Do not spam tickets\n" +
+      "> <:CF11:1488888964755492944> Provide detailed information\n" +
+      "> <:CF11:1488888964755492944> Be patient while waiting\n\n"
+    )
+    .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1488908758263402556/image.png")
+    .setFooter({ text: "Developer Hub • Support System" });
 
-"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
-
-"<:chat:1488905927896596582> **General Support**\n" +
-"> <:CF11:1488888964755492944> General Inquires\n" +
-"> <:CF11:1488888964755492944> General Concerns\n" +
-"> <:CF11:1488888964755492944> Member Reports\n\n" +
-
-"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
-  
-"<:paint1:1489376215146954983> **Designer Application**\n" +
-"> <:CF11:1488888964755492944> Become a Designer\n" +
-"> <:CF11:1488888964755492944> Make some Money!\n" +
-"> <:CF11:1488888964755492944> Show your talent\n\n" +
-
-"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
-
-"<:IA:1488906883648458863> **IA Support**\n" +
-"> <:CF11:1488888964755492944> Staff Reports\n" +
-"> <:CF11:1488888964755492944> Scam Reports\n" +
-"> <:CF11:1488888964755492944> LOA Requests\n" +
-"> <:CF11:1488888964755492944> Refund Requests\n\n" +
-
-"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
-
-"<:mgmt:1488907498332356820> **Management Support**\n" +
-"> <:CF11:1488888964755492944> High Rank Inquires\n" +
-"> <:CF11:1488888964755492944> Partnership Requests\n" +
-"> <:CF11:1488888964755492944> Role Requests\n\n" +
-
-"<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
-
-"**⚠️ Important**\n" + 
-  "> <:CF11:1488888964755492944> Do not spam tickets\n" + 
-  "> <:CF11:1488888964755492944> Provide detailed information\n" + 
-  "> <:CF11:1488888964755492944> Be patient while waiting\n\n"
-)
-.setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1488908758263402556/image.png")
-.setFooter({ text: "Developer Hub • Support System" });
-  
-const row = new ActionRowBuilder().addComponents(
-  new StringSelectMenuBuilder()
-    .setCustomId("ticket_select")
-    .setPlaceholder("Select a ticket type...")
-    .addOptions([
-      {
-        label: "General Support",
-        description: "Questions, help, or general issues",
-        value: "general_ticket",
-        emoji: { id: "1488905927896596582" }
-      },
-      {
-        label: "Internal Affairs",
-        description: "Report staff or serious concerns",
-        value: "ia_ticket",
-        emoji: { id: "1480281879516283071" }
-      },
-      {
-        label: "Management",
-        description: "Contact high command",
-        value: "mgmt_ticket",
-        emoji: { id: "1480283687223427313" }
-      },
-      {
-        label: "Designer Applications",
-        description: "Apply to become a designer",
-        value: "designer_ticket",
-        emoji: { id: "1489376215146954983" }
-      }
-    ])
-);
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("ticket_select")
+      .setPlaceholder("Select a ticket type...")
+      .addOptions([
+        { label: "General Support", description: "Questions, help, or general issues", value: "general_ticket", emoji: { id: "1488905927896596582" } },
+        { label: "Internal Affairs", description: "Report staff or serious concerns", value: "ia_ticket", emoji: { id: "1480281879516283071" } },
+        { label: "Management", description: "Contact high command", value: "mgmt_ticket", emoji: { id: "1480283687223427313" } }
+      ])
+  );
 
   const messages = await panelChannel.messages.fetch({ limit: 10 });
-const existing = messages.find(m => m.author.id === client.user.id);
-
-if (!existing) {
-  await panelChannel.send({
-    embeds: [headerEmbed, ticketEmbed],
-    components: [row]
-  });
-}
-
-}); 
+  const existing = messages.find(m => m.author.id === client.user.id);
+  if (!existing) {
+    await panelChannel.send({ embeds: [headerEmbed, ticketEmbed], components: [row] });
+  }
+});
 
 // ===== ANTI RAID + AUTO ROLES =====
 let recentJoins = [];
@@ -249,196 +179,157 @@ let raidMode = false;
 
 client.on("guildMemberAdd", async member => {
 
+  // Join gating: instantly kick if raid mode is active
+  if (raidMode) {
+    await member.kick("Server is in raid lockdown.").catch(() => {});
+    await member.send("The server is currently under a raid lockdown. Please try joining again later.").catch(() => {});
+    return;
+  }
+
   recentJoins.push(Date.now());
   recentJoins = recentJoins.filter(t => Date.now() - t < RAID_TIME_WINDOW);
 
-  // ===== RAID DETECTED =====
   if (recentJoins.length >= RAID_JOIN_THRESHOLD && !raidMode) {
-
     raidMode = true;
 
     const logChannel = member.guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
-
     logChannel?.send("🚨 **RAID DETECTED — LOCKDOWN INITIATED**");
 
-    // DISABLE ALL INVITES
-const invites = await member.guild.invites.fetch();
-for (const inv of invites.values()) {
-  await inv.delete().catch(() => {});
-}
+    const invites = await member.guild.invites.fetch();
+    for (const inv of invites.values()) await inv.delete().catch(() => {});
 
-    // AUTO LOCKDOWN
     if (AUTO_LOCKDOWN) {
       member.guild.channels.cache.forEach(channel => {
         if (channel.type === ChannelType.GuildText) {
-          channel.permissionOverwrites.edit(member.guild.roles.everyone, {
-            SendMessages: false
-          }).catch(()=>{});
+          channel.permissionOverwrites.edit(member.guild.roles.everyone, { SendMessages: false }).catch(() => {});
+          channel.permissionOverwrites.edit(UNVERIFIED_ROLE, { ViewChannel: false }).catch(() => {});
         }
       });
     }
 
-    // AUTO UNLOCK AFTER 10 MIN
+    // Ban all members who joined within the raid window
+    const recentMembers = member.guild.members.cache
+      .filter(m => Date.now() - m.joinedTimestamp < RAID_TIME_WINDOW)
+      .values();
+    for (const raider of recentMembers) {
+      await raider.ban({ reason: "Raid detection - auto ban" }).catch(() => {});
+    }
+
     setTimeout(() => {
       raidMode = false;
-
       member.guild.channels.cache.forEach(channel => {
         if (channel.type === ChannelType.GuildText) {
-          channel.permissionOverwrites.edit(member.guild.roles.everyone, {
-            SendMessages: true
-          }).catch(()=>{});
+          channel.permissionOverwrites.edit(member.guild.roles.everyone, { SendMessages: true }).catch(() => {});
+          channel.permissionOverwrites.edit(UNVERIFIED_ROLE, { ViewChannel: null }).catch(() => {});
         }
       });
-
       logChannel?.send("✅ Raid mode disabled. Server unlocked.");
     }, 10 * 60 * 1000);
   }
 
-  await member.roles.add(UNVERIFIED_ROLE).catch(() => {});
-  await member.roles.add(RAID_PING_ROLE_ID).catch(() => {});
-
-  // ===== ALT ACCOUNT PROTECTION =====
-const accountAge = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
-
-if (accountAge < MIN_ACCOUNT_AGE_DAYS) {
-
-  await member.kick("Alt account detected (too new)").catch(() => {});
-
-  member.guild.channels.cache
-    .get(FULL_LOG_CHANNEL_ID)
-    ?.send(`🚫 Kicked alt account: ${member.user.tag} (${accountAge.toFixed(1)} days old)`);
-
-  return;
-}
-
-  // ===== BOT JOIN =====
-if (member.user.bot) {
-
-  const logChannel = member.guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
-
-  const embed = new EmbedBuilder()
-    .setTitle("🤖 Bot Joined")
-    .setDescription(`Bot: ${member}\nTag: ${member.user.tag}\n\nApprove or deny this bot.`)
-    .setColor("#ff9900")
-    .setTimestamp();
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`bot_deny_${member.id}`)
-      .setLabel("Deny")
-      .setStyle(ButtonStyle.Danger),
-
-    new ButtonBuilder()
-      .setCustomId(`bot_confirm_${member.id}`)
-      .setLabel("Confirm")
-      .setStyle(ButtonStyle.Success)
-  );
-
-  logChannel?.send({
-    embeds: [embed],
-    components: [row]
-  });
-
-  return;
-}
-
-// ===== INVITE TRACKING =====
-const newInvites = await member.guild.invites.fetch();
-const oldInvites = inviteCache.get(member.guild.id);
-
-const usedInvite = newInvites.find(inv =>
-  oldInvites?.get(inv.code)?.uses < inv.uses
-);
-
-if (usedInvite && usedInvite.inviter) {
-
-  const inviter = usedInvite.inviter;
-  const inviterId = inviter.id;
-
-  // ACCOUNT AGE CHECK
+  // Alt account check BEFORE giving role
   const accountAge = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
-
   if (accountAge < MIN_ACCOUNT_AGE_DAYS) {
-
-    member.guild.channels.cache
-      .get(INVITE_LOG_CHANNEL)
-      ?.send(`⚠️ Invite from ${inviter.tag} ignored (new account under ${MIN_ACCOUNT_AGE_DAYS} days).`);
-
-  } else {
-
-    if (!inviteData[inviterId]) inviteData[inviterId] = {
-      invites: 0,
-      users: []
-    };
-
-    inviteData[inviterId].invites += 1;
-    inviteData[inviterId].users.push(member.id);
-
-    saveInvites();
-
-    member.guild.channels.cache
-      .get(INVITE_LOG_CHANNEL)
-      ?.send(`📈 ${inviter.tag} invited ${member.user.tag}`);
+    await member.kick("Alt account detected (too new)").catch(() => {});
+    member.guild.channels.cache.get(FULL_LOG_CHANNEL_ID)
+      ?.send(`🚫 Kicked alt account: ${member.user.tag} (${accountAge.toFixed(1)} days old)`);
+    return;
   }
-}
 
-// ===== WELCOME MESSAGE =====
-const welcomeChannel = member.guild.channels.cache.get("1482878525286650048");
+  await member.roles.add(UNVERIFIED_ROLE).catch(err => console.error("Failed to add unverified role:", err));
 
-if (welcomeChannel) {
-  welcomeChannel.send(
-    `Welcome ${member} to DevHub! We now have ${member.guild.memberCount} members.`
-  );
-}
+  // Bot join approval
+  if (member.user.bot) {
+    const logChannel = member.guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
+    const embed = new EmbedBuilder()
+      .setTitle("🤖 Bot Joined")
+      .setDescription(`Bot: ${member}\nTag: ${member.user.tag}\n\nApprove or deny this bot.`)
+      .setColor("#ff9900")
+      .setTimestamp();
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`bot_deny_${member.id}`).setLabel("Deny").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`bot_confirm_${member.id}`).setLabel("Confirm").setStyle(ButtonStyle.Success)
+    );
+    logChannel?.send({ embeds: [embed], components: [row] });
+    return;
+  }
 
-// Update cache
-inviteCache.set(member.guild.id, newInvites);
+  // Invite tracking
+  const newInvites = await member.guild.invites.fetch();
+  const oldInvites = inviteCache.get(member.guild.id);
+  const usedInvite = newInvites.find(inv => oldInvites?.get(inv.code)?.uses < inv.uses);
+
+  if (usedInvite && usedInvite.inviter) {
+    const inviter = usedInvite.inviter;
+    const inviterId = inviter.id;
+    if (accountAge >= MIN_ACCOUNT_AGE_DAYS) {
+      if (!inviteData[inviterId]) inviteData[inviterId] = { invites: 0, users: [] };
+      inviteData[inviterId].invites += 1;
+      inviteData[inviterId].users.push(member.id);
+      saveInvites();
+      member.guild.channels.cache.get(INVITE_LOG_CHANNEL)?.send(`📈 ${inviter.tag} invited ${member.user.tag}`);
+    } else {
+      member.guild.channels.cache.get(INVITE_LOG_CHANNEL)?.send(`⚠️ Invite from ${inviter.tag} ignored (new account under ${MIN_ACCOUNT_AGE_DAYS} days).`);
+    }
+  }
+
+  const welcomeChannel = member.guild.channels.cache.get("1482878525286650048");
+  if (welcomeChannel) welcomeChannel.send(`Welcome ${member} to DevHub! We now have ${member.guild.memberCount} members.`);
+
+  inviteCache.set(member.guild.id, newInvites);
 });
 
 // ===== REMOVE INVITE IF USER LEAVES =====
-client.on("guildMemberRemove", member => {
-
+client.on("guildMemberRemove", async member => {
+  // Invite tracking cleanup
   for (const inviterId in inviteData) {
-
     const data = inviteData[inviterId];
-
     if (data.users && data.users.includes(member.id)) {
-
       data.users = data.users.filter(id => id !== member.id);
-      data.invites -= 1;
-
-      if (data.invites < 0) data.invites = 0;
-
+      data.invites = Math.max(0, data.invites - 1);
       saveInvites();
-
-      member.guild.channels.cache
-        .get(INVITE_LOG_CHANNEL)
-        ?.send(`📉 Invite removed from <@${inviterId}> (user left)`);
-
+      member.guild.channels.cache.get(INVITE_LOG_CHANNEL)?.send(`📉 Invite removed from <@${inviterId}> (user left)`);
       break;
     }
   }
+
+  // Anti-nuke kick tracking
+  const guild = member.guild;
+  const logs = await guild.fetchAuditLogs({ type: 20, limit: 1 }).catch(() => null);
+  if (!logs) return;
+  const entry = logs.entries.first();
+  if (!entry || entry.target?.id !== member.id) return;
+  const executorId = entry.executor?.id;
+  if (!executorId) return;
+  trackNukeAction(guild, executorId, "Mass Kick Activity");
 });
 
-// ===== AUTOMOD (UPDATED - NO BYPASS) =====
+// ===== AUTOMOD LOG EMBED =====
+function sendAutomodLog(guild, user, channel, rule, action) {
+  const logChannel = guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
+  if (!logChannel) return;
+  const embed = new EmbedBuilder()
+    .setTitle("🤖 Automod Action")
+    .setColor("#ff4444")
+    .setThumbnail(user.displayAvatarURL())
+    .addFields(
+      { name: "User", value: `${user.tag} (${user.id})`, inline: true },
+      { name: "Channel", value: `<#${channel.id}>`, inline: true },
+      { name: "Rule Broken", value: rule, inline: false },
+      { name: "Action Taken", value: action, inline: false }
+    )
+    .setTimestamp();
+  logChannel.send({ embeds: [embed] });
+}
 
-// Function to normalize stretched words (fuuuck → fuck)
+// ===== AUTOMOD =====
 function normalizeWord(word) {
   return word.toLowerCase().replace(/(.)\1+/g, "$1");
 }
 
-const bannedWords = [
-  "nigger",
-  "faggot",
-  "fuck",
-  "bitch",
-  "cunt",
-  "retard",
-  "whore",
-  "slut"
-];
+const bannedWords = ["nigger", "faggot", "fuck", "bitch", "cunt", "retard", "whore", "slut"];
+const zalgoRegex = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]{3,}/;
 
-// ===== ANTI SPAM SYSTEM =====
 const messageTracker = new Map();
 const SPAM_LIMIT = 5;
 const SPAM_TIME = 3000;
@@ -446,84 +337,255 @@ const SPAM_TIME = 3000;
 client.on("messageCreate", async message => {
   if (!message.guild || message.author.bot) return;
 
+  const member = message.member;
+  const isNewMember = member && (Date.now() - member.joinedTimestamp) / (1000 * 60 * 60 * 24) < NEW_MEMBER_DAYS;
+  const userId = message.author.id;
+
   // ===== SPAM CHECK =====
-const userId = message.author.id;
+  if (!messageTracker.has(userId)) messageTracker.set(userId, []);
+  const timestamps = messageTracker.get(userId);
+  timestamps.push(Date.now());
+  const filtered = timestamps.filter(t => Date.now() - t < SPAM_TIME);
+  messageTracker.set(userId, filtered);
 
-if (!messageTracker.has(userId)) {
-  messageTracker.set(userId, []);
-}
+  const spamLimit = isNewMember ? 3 : SPAM_LIMIT;
+  if (filtered.length >= spamLimit) {
+    await message.member.timeout(10 * 60 * 1000).catch(() => {});
+    await message.channel.send(`🚫 ${message.author} muted for spamming.`);
+    messageTracker.delete(userId);
+    sendAutomodLog(message.guild, message.author, message.channel, "Spam", "10 Minute Timeout");
+    return;
+  }
 
-const timestamps = messageTracker.get(userId);
-timestamps.push(Date.now());
+  // ===== DISCORD INVITE DETECTION =====
+  const inviteRegex = /(discord\.gg|discord\.com\/invite)\/[a-zA-Z0-9]+/gi;
+  if (inviteRegex.test(message.content)) {
+    await message.delete().catch(() => {});
+    await message.member.timeout(5 * 60 * 1000).catch(() => {});
+    await message.author.send("Do not advertise other Discord servers.").catch(() => {});
+    addLog(message.member.id, "Invite Advertisement", "Automod", "5 Minute Timeout");
+    sendAutomodLog(message.guild, message.author, message.channel, "Discord Invite Advertisement", "5 Minute Timeout + Message Deleted");
+    return;
+  }
 
-const filtered = timestamps.filter(time => Date.now() - time < SPAM_TIME);
-messageTracker.set(userId, filtered);
+  // ===== LINK FILTER =====
+  const urlRegex = /https?:\/\/[^\s]+/gi;
+  const links = message.content.match(urlRegex);
+  if (links) {
+    const isAllowed = links.every(link => WHITELISTED_LINKS.some(domain => link.includes(domain)));
+    if (!isAllowed || isNewMember) {
+      await message.delete().catch(() => {});
+      await message.channel.send(`${message.author} Links are not permitted here.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+      sendAutomodLog(message.guild, message.author, message.channel, "Unauthorised Link", "Message Deleted");
+      return;
+    }
+  }
 
-if (filtered.length >= SPAM_LIMIT) {
+  // ===== MASS MENTION DETECTION =====
+  const mentionCount = message.mentions.users.size + message.mentions.roles.size;
+  if (mentionCount > MASS_MENTION_LIMIT) {
+    await message.delete().catch(() => {});
+    await message.member.timeout(15 * 60 * 1000).catch(() => {});
+    await message.author.send("You have been timed out for mass mentioning.").catch(() => {});
+    addLog(message.member.id, "Mass Mention", "Automod", "15 Minute Timeout");
+    sendAutomodLog(message.guild, message.author, message.channel, `Mass Mention (${mentionCount})`, "15 Minute Timeout + Message Deleted");
+    return;
+  }
 
-  await message.member.timeout(10 * 60 * 1000).catch(() => {});
-  await message.channel.send(`🚫 ${message.author} muted for spamming.`);
+  // ===== EMOJI SPAM =====
+  const emojiRegex = /(\p{Emoji_Presentation}|\p{Extended_Pictographic}|<a?:\w+:\d+>)/gu;
+  const emojiMatches = message.content.match(emojiRegex) || [];
+  if (emojiMatches.length > EMOJI_SPAM_LIMIT) {
+    await message.delete().catch(() => {});
+    await message.channel.send(`${message.author} Please don't spam emojis.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+    sendAutomodLog(message.guild, message.author, message.channel, `Emoji Spam (${emojiMatches.length})`, "Message Deleted");
+    return;
+  }
 
-  return;
-}
-  
+  // ===== ZALGO / UNICODE ABUSE =====
+  if (zalgoRegex.test(message.content)) {
+    await message.delete().catch(() => {});
+    await message.channel.send(`${message.author} Zalgo or unicode abuse is not allowed.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+    sendAutomodLog(message.guild, message.author, message.channel, "Zalgo/Unicode Abuse", "Message Deleted");
+    return;
+  }
+
+  // ===== REPEATED CHARACTER SPAM =====
+  if (/(.)\1{14,}/.test(message.content)) {
+    await message.delete().catch(() => {});
+    await message.channel.send(`${message.author} Please don't spam repeated characters.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+    sendAutomodLog(message.guild, message.author, message.channel, "Repeated Character Spam", "Message Deleted");
+    return;
+  }
+
+  // ===== CAPS SPAM =====
+  const capsPercent = (message.content.replace(/[^A-Z]/g, "").length / message.content.length) * 100;
+  if (message.content.length > 10 && capsPercent > 70) {
+    await message.delete().catch(() => {});
+    await message.channel.send(`${message.author} Please don't use excessive caps.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+    sendAutomodLog(message.guild, message.author, message.channel, "Excessive Caps", "Message Deleted");
+    return;
+  }
+
+  // ===== BANNED WORDS =====
   const words = message.content.split(/\s+/);
-
   for (let rawWord of words) {
     const clean = rawWord.replace(/[^a-zA-Z]/g, "");
     const normalized = normalizeWord(clean);
-
     if (bannedWords.includes(normalized)) {
-
       await message.delete().catch(() => {});
       await message.member.timeout(30 * 60 * 1000).catch(() => {});
-
-      addLog(
-        message.member.id,
-        "Prohibited Word",
-        "Automod",
-        "30 Minute Timeout"
-      );
-
-      // DM warning
-      await message.author.send(
-        "You cannot use that language, you have been issued a warning."
-      ).catch(() => {});
-
+      addLog(message.member.id, "Prohibited Word", "Automod", "30 Minute Timeout");
+      sendAutomodLog(message.guild, message.author, message.channel, "Prohibited Word", "30 Minute Timeout + Message Deleted");
+      await message.author.send("You cannot use that language, you have been issued a warning.").catch(() => {});
       return;
     }
   }
 });
 
-// LEVEL SYSTEM
+// ===== DM APPLICATION SYSTEM =====
+client.on("messageCreate", async message => {
+  if (message.guild) return; // only DMs
+  if (message.author.bot) return;
+
+  const userId = message.author.id;
+  const session = applicationSessions.get(userId);
+  const content = message.content.trim();
+
+  // Trigger: user says "apply"
+  if (!session && content.toLowerCase() === "apply") {
+    applicationSessions.set(userId, { state: "instructions", answers: [] });
+
+    const instructionsEmbed = new EmbedBuilder()
+      .setTitle("Designer Application")
+      .setDescription(
+        "Thank you for applying to become a designer! Please follow these instructions so you can submit and finish the application.\n\n" +
+        "When you finish reading this please say **ready** to start the application.\n\n" +
+        "Once done those questions say **done** and then follow the instructions that you are given."
+      )
+      .setColor("#2A5CFF")
+      .setTimestamp();
+
+    await message.author.send({ embeds: [instructionsEmbed] }).catch(() => {});
+    return;
+  }
+
+  // User says "ready" — send questions
+  if (session && session.state === "instructions" && content.toLowerCase() === "ready") {
+    session.state = "awaiting_answers";
+    session.answers = [];
+    applicationSessions.set(userId, session);
+
+    const questionsEmbed = new EmbedBuilder()
+      .setTitle("Designer Application")
+      .setDescription(
+        "Thank you for taking your time to apply for our designer application! Please answer the following questions in this personal message and they will be forwarded to our applications team. Without further ado lets begin.\n\n" +
+        "**Q1 -** What is your Roblox Username?\n" +
+        "**Q2 -** What do you focus on? (GFX, Clothing, etc)\n" +
+        "**Q3 -** How old are you?\n" +
+        "**Q4 -** What design tools do you use?\n" +
+        "**Q5 -** Do you have any previous experience designing for Roblox groups or communities? If yes, explain.\n" +
+        "**Q6 -** How would you handle a request from a client that you disagree with or find difficult?\n" +
+        "**Q7 -** How do you ensure your designs are high quality and meet requirements?\n" +
+        "**Q8 -** Are you able to meet deadlines and work under pressure? Explain your approach.\n" +
+        "**Q9 -** How do you handle feedback or criticism on your designs?\n" +
+        "**Q10 -** Is there anything else we should know about you or your design experience?\n\n" +
+        "***Once you are finished answering these questions please say **\"done\"** and we will continue with the application.***"
+      )
+      .setColor("#2A5CFF")
+      .setTimestamp();
+
+    await message.author.send({ embeds: [questionsEmbed] }).catch(() => {});
+    return;
+  }
+
+  // Collecting answers
+  if (session && session.state === "awaiting_answers" && content.toLowerCase() !== "done") {
+    session.answers.push(content);
+    applicationSessions.set(userId, session);
+    return;
+  }
+
+  // User says "done" — prompt for images
+  if (session && session.state === "awaiting_answers" && content.toLowerCase() === "done") {
+    session.state = "awaiting_images";
+    applicationSessions.set(userId, session);
+
+    const almostThereEmbed = new EmbedBuilder()
+      .setTitle("Almost there!")
+      .setDescription("Please finish by providing images of your previous work.")
+      .setColor("#2A5CFF")
+      .setTimestamp();
+
+    await message.author.send({ embeds: [almostThereEmbed] }).catch(() => {});
+    return;
+  }
+
+  // User sends images — finalise application
+  if (session && session.state === "awaiting_images") {
+    if (message.attachments.size === 0) {
+      await message.author.send("Please send at least one image to complete your application.").catch(() => {});
+      return;
+    }
+
+    await message.author.send(
+      "Thank you for providing those images — your application will now be forwarded to the applications team where they will review and discuss your application."
+    ).catch(() => {});
+
+    const appChannel = client.channels.cache.get(APPLICATION_LOG_CHANNEL);
+    if (appChannel) {
+      const answersText = session.answers.length > 0
+        ? session.answers.map((a, i) => `**Q${i + 1}:** ${a}`).join("\n")
+        : "No answers recorded.";
+
+      const appEmbed = new EmbedBuilder()
+        .setTitle(`Designer Application — ${message.author.tag}`)
+        .setDescription(answersText)
+        .setColor("#2A5CFF")
+        .setThumbnail(message.author.displayAvatarURL())
+        .setFooter({ text: `User ID: ${message.author.id}` })
+        .setTimestamp();
+
+      const approveRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`appv2_deny_${message.author.id}`)
+          .setLabel("Deny")
+          .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+          .setCustomId(`appv2_approve_${message.author.id}`)
+          .setLabel("Approve")
+          .setStyle(ButtonStyle.Success)
+      );
+
+      await appChannel.send({ embeds: [appEmbed], components: [approveRow] });
+
+      // Send images as a second message
+      const imageUrls = message.attachments.map(a => a.url).join("\n");
+      await appChannel.send(`**Designer Application — ${message.author.tag}**\n${imageUrls}`);
+    }
+
+    applicationSessions.delete(userId);
+    return;
+  }
+});
+
+// ===== LEVEL SYSTEM =====
 const MAX_LEVEL = 100;
 
 client.on("messageCreate", async message => {
   if (!message.guild || message.author.bot) return;
 
-  if (!levelData[message.author.id]) {
-    levelData[message.author.id] = {
-      xp: 0,
-      level: 1
-    };
-  }
-
+  if (!levelData[message.author.id]) levelData[message.author.id] = { xp: 0, level: 1 };
   const user = levelData[message.author.id];
+  if (user.level >= MAX_LEVEL) return;
 
-  if (user.level >= MAX_LEVEL) return; // STOP at level 100
-
-  const xpGain = Math.floor(Math.random() * 10) + 5;
-  user.xp += xpGain;
-
+  user.xp += Math.floor(Math.random() * 10) + 5;
   const requiredXP = user.level * 100;
 
   if (user.xp >= requiredXP) {
-    user.xp -= requiredXP; // ✅ carry over extra XP instead of wiping
+    user.xp -= requiredXP;
     user.level += 1;
-
-    message.channel.send(
-      `🎉 ${message.author} leveled up to Level ${user.level}!`
-    );
+    message.channel.send(`🎉 ${message.author} leveled up to Level ${user.level}!`);
   }
 
   saveLevels();
@@ -531,170 +593,72 @@ client.on("messageCreate", async message => {
 
 // ===== SLASH COMMANDS =====
 const commands = [
-
-  new SlashCommandBuilder()
-    .setName('verify')
-    .setDescription('Verify yourself'),
-
-  new SlashCommandBuilder()
-    .setName('ssu')
-    .setDescription('Begin the server!'),
-
-new SlashCommandBuilder()
-  .setName('ssd')
-  .setDescription('End the server session'),
-
-  new SlashCommandBuilder()
-    .setName('promote')
-    .setDescription('Promote a user')
+  new SlashCommandBuilder().setName('verify').setDescription('Verify yourself'),
+  new SlashCommandBuilder().setName('promote').setDescription('Promote a user')
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
     .addRoleOption(o => o.setName('role').setDescription('Role to give').setRequired(true))
     .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
-
-   new SlashCommandBuilder()
-  .setName('demote')
-  .setDescription('Demote a user')
-  .addUserOption(o =>
-    o.setName('user')
-    .setDescription('User to demote')
-    .setRequired(true))
-  .addRoleOption(o =>
-    o.setName('demoted_to')
-    .setDescription('Role they are being demoted to')
-    .setRequired(true))
-  .addRoleOption(o =>
-    o.setName('remove_role')
-    .setDescription('Role being removed')
-    .setRequired(true))
-  .addStringOption(o =>
-    o.setName('reason')
-    .setDescription('Reason for demotion')
-    .setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('warn')
-    .setDescription('Warn a user')
+  new SlashCommandBuilder().setName('demote').setDescription('Demote a user')
+    .addUserOption(o => o.setName('user').setDescription('User to demote').setRequired(true))
+    .addRoleOption(o => o.setName('demoted_to').setDescription('Role they are being demoted to').setRequired(true))
+    .addRoleOption(o => o.setName('remove_role').setDescription('Role being removed').setRequired(true))
+    .addStringOption(o => o.setName('reason').setDescription('Reason for demotion').setRequired(true)),
+  new SlashCommandBuilder().setName('warn').setDescription('Warn a user')
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
     .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('logs')
-    .setDescription('View player logs')
+  new SlashCommandBuilder().setName('logs').setDescription('View player logs')
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('clearlogs')
-    .setDescription('Clear player logs')
+  new SlashCommandBuilder().setName('clearlogs').setDescription('Clear player logs')
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('ban')
-    .setDescription('Permanently ban a user')
+  new SlashCommandBuilder().setName('ban').setDescription('Permanently ban a user')
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
     .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('tban')
-    .setDescription('Temporarily ban a user')
+  new SlashCommandBuilder().setName('tban').setDescription('Temporarily ban a user')
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
     .addIntegerOption(o => o.setName('hours').setDescription('Hours').setRequired(true))
-    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true))
-
-  ,
-
-  new SlashCommandBuilder()
-    .setName('strike')
-    .setDescription('Strike a user')
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
+  new SlashCommandBuilder().setName('strike').setDescription('Strike a user')
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
     .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
-
-  new SlashCommandBuilder()
-  .setName('clearstrikes')
-  .setDescription('Clear all strikes from a user')
-  .addUserOption(o =>
-    o.setName('user')
-    .setDescription('User to clear strikes for')
-    .setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('strikes')
-    .setDescription('Check strikes')
+  new SlashCommandBuilder().setName('clearstrikes').setDescription('Clear all strikes from a user')
+    .addUserOption(o => o.setName('user').setDescription('User to clear strikes for').setRequired(true)),
+  new SlashCommandBuilder().setName('strikes').setDescription('Check strikes')
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('mute')
-    .setDescription('Timeout a user')
+  new SlashCommandBuilder().setName('mute').setDescription('Timeout a user')
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
     .addIntegerOption(o => o.setName('minutes').setDescription('Minutes').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('slowmode')
-    .setDescription('Set slowmode in current channel')
+  new SlashCommandBuilder().setName('slowmode').setDescription('Set slowmode in current channel')
     .addIntegerOption(o => o.setName('seconds').setDescription('Seconds').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('recruitleaderboard')
-    .setDescription('Top recruiters'),
-
-new SlashCommandBuilder()
-  .setName('myinvites')
-  .setDescription('Check how many users you have invited'),
-
-  new SlashCommandBuilder()
-    .setName('mylevel')
-    .setDescription('Check your level'),
-
-  new SlashCommandBuilder()
-    .setName('leaderboard')
-    .setDescription('XP leaderboard'),
-
-  new SlashCommandBuilder()
-  .setName('lockdown')
-  .setDescription('Lock the entire server'),
-
-new SlashCommandBuilder()
-  .setName('unlockdown')
-  .setDescription('Unlock the server'),
-
-  new SlashCommandBuilder()
-  .setName('claim')
-  .setDescription('Claim a ticket'),
-
-new SlashCommandBuilder()
-  .setName('close')
-  .setDescription('Close a ticket')
-  .addStringOption(o =>
-    o.setName('reason')
-    .setDescription('Reason for closing')
-    .setRequired(true)),
-
-new SlashCommandBuilder()
-  .setName('closereq')
-  .setDescription('Ask the user if they want to close the ticket')
-
+  new SlashCommandBuilder().setName('recruitleaderboard').setDescription('Top recruiters'),
+  new SlashCommandBuilder().setName('myinvites').setDescription('Check how many users you have invited'),
+  new SlashCommandBuilder().setName('mylevel').setDescription('Check your level'),
+  new SlashCommandBuilder().setName('leaderboard').setDescription('XP leaderboard'),
+  new SlashCommandBuilder().setName('lockdown').setDescription('Lock the entire server'),
+  new SlashCommandBuilder().setName('unlockdown').setDescription('Unlock the server'),
+  new SlashCommandBuilder().setName('claim').setDescription('Claim a ticket'),
+  new SlashCommandBuilder().setName('close').setDescription('Close a ticket')
+    .addStringOption(o => o.setName('reason').setDescription('Reason for closing').setRequired(true)),
+  new SlashCommandBuilder().setName('closereq').setDescription('Ask the user if they want to close the ticket')
 ];
 
+// ===== ANTI NUKE FUNCTIONS =====
 async function punishNuker(guild, userId, reason) {
+  if (userId === client.user.id) return;
+  if (userId === guild.ownerId) return;
+
   try {
     const member = await guild.members.fetch(userId).catch(() => null);
-
-    if (member && AUTO_BAN_NUKERS) {
-      await member.ban({ reason: `Anti-Nuke: ${reason}` }).catch(() => {});
-    }
+    if (member && AUTO_BAN_NUKERS) await member.ban({ reason: `Anti-Nuke: ${reason}` }).catch(() => {});
 
     const logChannel = guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
     logChannel?.send(`🚨 Anti-Nuke triggered on <@${userId}> — ${reason}`);
 
     if (AUTO_LOCKDOWN_ON_NUKE) {
       guild.channels.cache.forEach(channel => {
-        if (channel.type === ChannelType.GuildText) {
-          channel.permissionOverwrites.edit(guild.roles.everyone, {
-            SendMessages: false
-          }).catch(() => {});
-        }
+        if (channel.type === ChannelType.GuildText)
+          channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false }).catch(() => {});
       });
     }
-
   } catch (err) {
     console.log("Anti-nuke error:", err);
   }
@@ -702,272 +666,117 @@ async function punishNuker(guild, userId, reason) {
 
 function trackNukeAction(guild, userId, reason) {
   const now = Date.now();
-
   if (!antiNukeTracker.has(userId)) {
     antiNukeTracker.set(userId, { count: 1, first: now });
     return;
   }
-
   const data = antiNukeTracker.get(userId);
-
   if (now - data.first > NUKER_TIME_WINDOW) {
     data.count = 1;
     data.first = now;
     return;
   }
-
   data.count++;
-
   if (data.count >= NUKER_THRESHOLD) {
     punishNuker(guild, userId, reason);
     antiNukeTracker.delete(userId);
     return;
   }
-
   antiNukeTracker.set(userId, data);
 }
 
-
-// ===== COMMAND HANDLERS (DUAL SUPPORT CORE) =====
-
-async function handleVerify(ctx) {
-  if (ctx.channelId !== VERIFY_CHANNEL_ID)
-    return ctx.reply("❌ Use this in verify channel.", true);
-
-  if (!ctx.member.roles.cache.has(UNVERIFIED_ROLE))
-    return ctx.reply("❌ Already verified.", true);
-
-  await ctx.member.roles.remove(UNVERIFIED_ROLE);
-  for (const role of VERIFIED_ROLES) {
-    await ctx.member.roles.add(role);
-  }
-
-  return ctx.reply("✅ Verified!", true);
-}
-
-async function handleRaidCall(ctx, time) {
-  if (!ctx.member.roles.cache.has(RAID_COMMANDER_ROLE_ID))
-    return ctx.reply("❌ No permission.", true);
-
-  if (!time) return ctx.reply("❌ Provide a time.", true);
-
-  const embed = new EmbedBuilder()
-    .setTitle("```TBV RAID```")
-    .setDescription(
-      `Called by ${ctx.user}\nTime: ${time} EST\n\nReact with ✅ if you are attending.`
-    )
-    .setColor(0x2b2d31)
-    .setTimestamp();
-
-  const message = await ctx.reply({
-    content: `<@&${RAID_PING_ROLE_ID}>`,
-    embeds: [embed],
-    allowedMentions: { roles: [RAID_PING_ROLE_ID] },
-    fetchReply: true
-  });
-
-  await message.react("✅");
-}
-
-// ===== INTERACTIONS =====
+// ===== SLASH COMMAND HANDLER =====
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
   // VERIFY
   if (interaction.commandName === "verify") {
-
     if (interaction.channelId !== VERIFY_CHANNEL_ID)
       return interaction.reply({ content: "❌ Use this in verify channel.", ephemeral: true });
 
-    if (!interaction.member.roles.cache.has(UNVERIFIED_ROLE))
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    if (!member.roles.cache.has(UNVERIFIED_ROLE))
       return interaction.reply({ content: "❌ Already verified.", ephemeral: true });
 
-    await interaction.member.roles.remove(UNVERIFIED_ROLE);
-    for (const role of VERIFIED_ROLES) {
-      await interaction.member.roles.add(role);
-    }
-
+    await member.roles.remove(UNVERIFIED_ROLE);
+    for (const role of VERIFIED_ROLES) await member.roles.add(role);
     return interaction.reply({ content: "✅ Verified!", ephemeral: true });
   }
 
-  // SSU START
-  if (interaction.commandName === "ssu") {
-
-    if (!interaction.member.roles.cache.has(RAID_COMMANDER_ROLE_ID))
-    return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-  const embed = new EmbedBuilder()
-  .setTitle("```Florida State SSU```")
-  .setDescription(
-    "The Staff Team has called an SSU! Join the server with the code: floridav.\n\n" +
-    "If you want to have fun in our server, join the server to experience Florida State Roleplay! We hope you have tons of fun and we can't wait to see you in game!"
-  )
-  .setColor(0x2b2d31)
-  .setImage("https://cdn.discordapp.com/attachments/1434641410782400605/1480037200715579503/sessions.webp?ex=69ae378e&is=69ace60e&hm=064d4078f5613232264860b3a01117455187a9ba4e1e80c369f89c44c5f11729")
-  .setTimestamp();
-
-const msg = await interaction.reply({
-  content: `<@&${RAID_PING_ROLE_ID}>`,
-  embeds: [embed],
-  allowedMentions: { roles: [RAID_PING_ROLE_ID] },
-  fetchReply: true
-});
-
-// Save message so SSD can delete it later
-lastSSUMessage = msg;
-}
-
-// SESSION END
-if (interaction.commandName === "ssd") {
-
-  if (!interaction.member.roles.cache.has(RAID_COMMANDER_ROLE_ID))
-    return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-// Delete previous SSU message
-if (lastSSUMessage) {
-  try {
-    await lastSSUMessage.delete();
-    lastSSUMessage = null;
-  } catch (err) {
-    console.log("Couldn't delete SSU message.");
-  }
-}
-
-  const embed = new EmbedBuilder()
-  .setTitle("```Session Ended```")
-  .setDescription(
-    `The session has been ended by ${interaction.user}.\n\n` +
-    "Join us next time and thank you to everyone who helped and joined the server. " +
-    "We hope you had a great time. See you next time!"
-  )
-  .setColor(0x2b2d31)
-  .setImage("https://cdn.discordapp.com/attachments/1434641410782400605/1480037200715579503/sessions.webp?ex=69ae378e&is=69ace60e&hm=064d4078f5613232264860b3a01117455187a9ba4e1e80c369f89c44c5f11729")
-  .setTimestamp();
-
-const msg = await interaction.reply({
-  content: `<@&${RAID_PING_ROLE_ID}>`,
-  embeds: [embed],
-  allowedMentions: { roles: [RAID_PING_ROLE_ID] },
-  fetchReply: true
-});
-
-// Delete SSD message after 10 minutes
-setTimeout(() => {
-  msg.delete().catch(() => {});
-}, 10 * 60 * 1000);
-}
-
   // PROMOTE
-if (interaction.commandName === "promote") {
+  if (interaction.commandName === "promote") {
+    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
-  if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-    return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+    const user = interaction.options.getUser("user");
+    const role = interaction.options.getRole("role");
+    const reason = interaction.options.getString("reason") || "No reason provided";
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    if (!member) return interaction.reply({ content: "User not found in server.", ephemeral: true });
 
-  const user = interaction.options.getUser("user");
-  const role = interaction.options.getRole("role"); // ✅ FIX ADDED
-  const reason = interaction.options.getString("reason") || "No reason provided";
+    await member.roles.add(role).catch(() => {});
+    addLog(member.id, "Promotion", interaction.user.tag, reason);
 
-  const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    const embed = new EmbedBuilder()
+      .setTitle("Staff Promotion")
+      .setDescription(`Congratulations! ${member} has been promoted by ${interaction.user}.`)
+      .addFields(
+        { name: "Staff Member", value: `${member}`, inline: false },
+        { name: "New Rank", value: `${role}`, inline: false },
+        { name: "Reason", value: `${reason}`, inline: false }
+      )
+      .setColor("#f1c40f")
+      .setThumbnail(member.user.displayAvatarURL())
+      .setFooter({ text: `Promotion issued by ${interaction.user.tag}` })
+      .setTimestamp();
 
-  if (!member)
-    return interaction.reply({ content: "User not found in server.", ephemeral: true });
-
-  // GIVE ROLE
-  await member.roles.add(role).catch(() => {});
-
-  // LOG
-  addLog(member.id, "Promotion", interaction.user.tag, reason);
-
-  // EMBED
-  const embed = new EmbedBuilder()
-    .setTitle("Staff Promotion")
-    .setDescription(
-      `Congratulations! ${member} has been promoted by ${interaction.user}.`
-    )
-    .addFields(
-      { name: "Staff Member", value: `${member}`, inline: false },
-      { name: "New Rank", value: `${role}`, inline: false },
-      { name: "Reason", value: `${reason}`, inline: false }
-    )
-    .setColor("#f1c40f")
-    .setThumbnail(member.user.displayAvatarURL())
-    .setFooter({ text: `Promotion issued by ${interaction.user.tag}` })
-    .setTimestamp();
-
-  const channel = interaction.guild.channels.cache.get("1489097136929902624");
-
-  if (channel) {
-    channel.send({
-      content: `${member}`,
-      embeds: [embed]
-    });
+    const channel = interaction.guild.channels.cache.get("1489097136929902624");
+    if (channel) channel.send({ content: `${member}`, embeds: [embed] });
+    return interaction.reply({ content: "✅ Promotion sent.", ephemeral: true });
   }
 
-  return interaction.reply({
-    content: "✅ Promotion sent.",
-    ephemeral: true
-  });
-}
-  
- // DEMOTE
-if (interaction.commandName === "demote") {
+  // DEMOTE
+  if (interaction.commandName === "demote") {
+    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
-  if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-    return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+    const member = interaction.options.getMember("user");
+    const demotedRole = interaction.options.getRole("demoted_to");
+    const removeRole = interaction.options.getRole("remove_role");
+    const reason = interaction.options.getString("reason");
 
-  const member = interaction.options.getMember("user");
-  const demotedRole = interaction.options.getRole("demoted_to");
-  const removeRole = interaction.options.getRole("remove_role");
-  const reason = interaction.options.getString("reason");
+    await member.roles.remove(removeRole).catch(() => {});
+    await member.roles.add(demotedRole).catch(() => {});
+    addLog(member.id, "Demotion", interaction.user.tag, reason);
 
-  // Remove old role
-  await member.roles.remove(removeRole).catch(()=>{});
+    const embed = new EmbedBuilder()
+      .setTitle("<:florida2:1478801582056538305> Demotion")
+      .setDescription(`${member} has been demoted to ${demotedRole}.`)
+      .addFields(
+        { name: "Person", value: `${member}`, inline: false },
+        { name: "New Role", value: `${demotedRole}`, inline: false },
+        { name: "Reason", value: `${reason}`, inline: false }
+      )
+      .setColor("#2b2d31")
+      .setThumbnail(member.user.displayAvatarURL())
+      .setFooter({ text: `Demoted by ${interaction.user.tag}` })
+      .setTimestamp();
 
-  // Give new role
-  await member.roles.add(demotedRole).catch(()=>{});
-
-  addLog(member.id, "Demotion", interaction.user.tag, reason);
-
-  const embed = new EmbedBuilder()
-    .setTitle("<:florida2:1478801582056538305> Demotion")
-    .setDescription(`${member} has been demoted to ${demotedRole}. Please follow the rules and do your duties as a staff next time.`)
-    .addFields(
-      { name: "Person", value: `${member}`, inline: false },
-      { name: "New Role", value: `${demotedRole}`, inline: false },
-      { name: "Reason", value: `${reason}`, inline: false }
-    )
-    .setColor("#2b2d31")
-    .setThumbnail(member.user.displayAvatarURL())
-    .setFooter({ text: `Demoted by ${interaction.user.tag}` })
-    .setTimestamp();
-
-  const channel = interaction.guild.channels.cache.get("1489097083029033060");
-
-  if (channel) {
-    channel.send({
-      content: `${member}`,
-      embeds: [embed]
-    });
+    const channel = interaction.guild.channels.cache.get("1489097083029033060");
+    if (channel) channel.send({ content: `${member}`, embeds: [embed] });
+    return interaction.reply({ content: "✅ Demotion sent.", ephemeral: true });
   }
-
-  return interaction.reply({
-    content: "✅ Demotion sent.",
-    ephemeral: true
-  });
-}
 
   // WARN
   if (interaction.commandName === "warn") {
     if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-  return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
     const user = interaction.options.getUser("user");
     const reason = interaction.options.getString("reason");
-
     addLog(user.id, "Warning", interaction.user.tag, reason);
-
     await interaction.reply({ content: `⚠️ ${user.tag} warned.` });
-setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
   }
 
   // LOGS
@@ -977,14 +786,10 @@ setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
 
     const user = interaction.options.getUser("user");
     const logs = playerLogs[user.id];
-
     if (!logs || logs.length === 0)
       return interaction.reply({ content: "No logs found.", ephemeral: true });
 
-    const formatted = logs.map(l =>
-      `• [${l.date}] ${l.type} | ${l.moderator} | ${l.reason}`
-    ).join("\n");
-
+    const formatted = logs.map(l => `• [${l.date}] ${l.type} | ${l.moderator} | ${l.reason}`).join("\n");
     return interaction.reply({ content: formatted, ephemeral: true });
   }
 
@@ -996,75 +801,51 @@ setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
     const user = interaction.options.getUser("user");
     playerLogs[user.id] = [];
     saveLogs();
-
     await interaction.reply({ content: `🧹 Logs cleared.` });
-setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
   }
 
- // STRIKE
-if (interaction.commandName === "strike") {
+  // STRIKE
+  if (interaction.commandName === "strike") {
+    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
-  if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-    return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+    const user = interaction.options.getUser("user");
+    const reason = interaction.options.getString("reason");
+    const member = interaction.guild.members.cache.get(user.id);
 
-  const user = interaction.options.getUser("user");
-  const reason = interaction.options.getString("reason");
-  const member = interaction.guild.members.cache.get(user.id);
+    if (!strikeData[user.id]) strikeData[user.id] = 0;
+    strikeData[user.id] += 1;
+    saveStrikes();
+    const strikes = strikeData[user.id];
 
-  if (!strikeData[user.id]) strikeData[user.id] = 0;
+    const embed = new EmbedBuilder()
+      .setTitle("<:dh:1487558730642882861> Strike")
+      .setDescription(`${user} has been issued a strike by ${interaction.user}.`)
+      .addFields(
+        { name: "> User", value: `${user}`, inline: false },
+        { name: "> Punishment", value: `Strike ${strikes}`, inline: false },
+        { name: "> Reason", value: `${reason}`, inline: false }
+      )
+      .setColor("#2b2d31")
+      .setThumbnail(user.displayAvatarURL())
+      .setFooter({ text: `Strike issued by ${interaction.user.tag}` })
+      .setTimestamp();
 
-  strikeData[user.id] += 1;
-  saveStrikes();
+    const channel = interaction.guild.channels.cache.get("1489097083029033060");
+    if (channel) channel.send({ content: `${user}`, embeds: [embed] });
+    await interaction.reply({ content: "✅ Strike issued.", ephemeral: true });
 
-  const strikes = strikeData[user.id];
-
-  // Embed
-  const embed = new EmbedBuilder()
-    .setTitle("<:dh:1487558730642882861> Strike")
-    .setDescription(`${user} has been issued a strike by ${interaction.user}. Please do not continue to do so or else you will face other consequences.`)
-    .addFields(
-      { name: "> User", value: `${user}`, inline: false },
-      { name: "> Punishment", value: `Strike ${strikes}`, inline: false },
-      { name: "> Reason", value: `${reason}`, inline: false }
-    )
-    .setColor("#2b2d31")
-    .setThumbnail(user.displayAvatarURL())
-    .setFooter({ text: `Strike issued by ${interaction.user.tag}` })
-    .setTimestamp();
-
-  const channel = interaction.guild.channels.cache.get("1489097083029033060");
-
-  if (channel) {
-    channel.send({
-      content: `${user}`,
-      embeds: [embed]
-    });
+    if (strikes === 5 && member) {
+      await member.ban({ reason: "5 Strikes - 48 Hour Temp Ban" });
+      setTimeout(() => interaction.guild.members.unban(user.id).catch(() => {}), 48 * 60 * 60 * 1000);
+    }
   }
-
-  await interaction.reply({
-    content: "✅ Strike issued.",
-    ephemeral: true
-  });
-
-    // AUTO 48H TEMP BAN AT 5 STRIKES
-
-if (strikes === 5 && member) {
-
-  await member.ban({ reason: "5 Strikes - 48 Hour Temp Ban" });
-
-  setTimeout(() => {
-    interaction.guild.members.unban(user.id).catch(() => {});
-  }, 48 * 60 * 60 * 1000);
-}
-
-}
 
   // CHECK STRIKES
   if (interaction.commandName === "strikes") {
     const user = interaction.options.getUser("user");
-    const strikes = strikeData[user.id] || 0;
-
-    return interaction.reply({ content: `${user.tag} has ${strikes} strike(s).`, ephemeral: true });
+    return interaction.reply({ content: `${user.tag} has ${strikeData[user.id] || 0} strike(s).`, ephemeral: true });
   }
 
   // MUTE
@@ -1074,28 +855,20 @@ if (strikes === 5 && member) {
 
     const member = interaction.options.getMember("user");
     const minutes = interaction.options.getInteger("minutes");
-
     await member.timeout(minutes * 60 * 1000);
-
     return interaction.reply(`${member.user.tag} muted for ${minutes} minutes.`);
   }
 
   // CLEAR STRIKES
-if (interaction.commandName === "clearstrikes") {
+  if (interaction.commandName === "clearstrikes") {
+    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
-  if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-    return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-  const user = interaction.options.getUser("user");
-
-  strikeData[user.id] = 0;
-  saveStrikes();
-
-  return interaction.reply({
-    content: `✅ Cleared all strikes for ${user.tag}.`
-  });
-
-}
+    const user = interaction.options.getUser("user");
+    strikeData[user.id] = 0;
+    saveStrikes();
+    return interaction.reply({ content: `✅ Cleared all strikes for ${user.tag}.` });
+  }
 
   // SLOWMODE
   if (interaction.commandName === "slowmode") {
@@ -1103,51 +876,31 @@ if (interaction.commandName === "clearstrikes") {
       return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
     const seconds = interaction.options.getInteger("seconds");
-
     await interaction.channel.setRateLimitPerUser(seconds);
-
     return interaction.reply(`Slowmode set to ${seconds} seconds.`);
   }
 
-    // LOCKDOWN
+  // LOCKDOWN
   if (interaction.commandName === "lockdown") {
-
     if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
       return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
     interaction.guild.channels.cache.forEach(channel => {
-
-      if (channel.type === ChannelType.GuildText) {
-
-        channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
-          SendMessages: false
-        }).catch(()=>{});
-
-      }
-
+      if (channel.type === ChannelType.GuildText)
+        channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false }).catch(() => {});
     });
-
     return interaction.reply("🔒 Server lockdown enabled.");
   }
 
   // UNLOCKDOWN
   if (interaction.commandName === "unlockdown") {
-
     if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
       return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
     interaction.guild.channels.cache.forEach(channel => {
-
-      if (channel.type === ChannelType.GuildText) {
-
-        channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
-          SendMessages: true
-        }).catch(()=>{});
-
-      }
-
+      if (channel.type === ChannelType.GuildText)
+        channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: true }).catch(() => {});
     });
-
     return interaction.reply("🔓 Server lockdown removed.");
   }
 
@@ -1157,16 +910,12 @@ if (interaction.commandName === "clearstrikes") {
       return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
     const user = interaction.options.getUser("user");
-const reason = interaction.options.getString("reason") || "No reason provided";
-const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    const reason = interaction.options.getString("reason") || "No reason provided";
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    if (!member) return interaction.reply({ content: "User is not in this server.", ephemeral: true });
 
-if (!member) {
-  return interaction.reply({
-    content: "User is not in this server.",
-    ephemeral: true
-  });
-}
     addLog(user.id, "Permanent Ban", interaction.user.tag, reason);
+    await member.ban({ reason });
 
     const embed = new EmbedBuilder()
       .setTitle(`${user.tag} | Ban`)
@@ -1175,9 +924,8 @@ if (!member) {
       .setTimestamp();
 
     interaction.guild.channels.cache.get(BAN_LOG_CHANNEL)?.send({ embeds: [embed] });
-
     await interaction.reply({ content: `${user.tag} banned.` });
-setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
   }
 
   // TEMP BAN
@@ -1188,157 +936,96 @@ setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
     const user = interaction.options.getUser("user");
     const hours = interaction.options.getInteger("hours");
     const reason = interaction.options.getString("reason");
-    const member = interaction.guild.members.cache.get(user.id);
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    if (!member) return interaction.reply({ content: "User not found.", ephemeral: true });
 
     await member.ban({ reason: `${reason} (${hours}h)` });
     addLog(user.id, "Temp Ban", interaction.user.tag, reason);
-
-    setTimeout(() => {
-      interaction.guild.members.unban(user.id).catch(() => {});
-    }, hours * 60 * 60 * 1000);
-
+    setTimeout(() => interaction.guild.members.unban(user.id).catch(() => {}), hours * 60 * 60 * 1000);
     await interaction.reply({ content: `${user.tag} banned for ${hours} hours.` });
-setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
   }
 
   // MY LEVEL
   if (interaction.commandName === "mylevel") {
-
     const data = levelData[interaction.user.id];
-
-    if (!data)
-      return interaction.reply({ content: "You have no XP yet.", ephemeral: true });
-
-    const requiredXP = data.level * 100;
-
-    return interaction.reply({
-      content: `Level: ${data.level}\nXP: ${data.xp}/${requiredXP}`,
-      ephemeral: true
-    });
+    if (!data) return interaction.reply({ content: "You have no XP yet.", ephemeral: true });
+    return interaction.reply({ content: `Level: ${data.level}\nXP: ${data.xp}/${data.level * 100}`, ephemeral: true });
   }
 
   // XP LEADERBOARD
   if (interaction.commandName === "leaderboard") {
-
-    const sorted = Object.entries(levelData)
-      .sort((a, b) => b[1].level - a[1].level)
-      .slice(0, 10);
-
-    if (sorted.length === 0)
-      return interaction.reply("No data yet.");
-
-    const leaderboard = sorted
-      .map((user, index) => {
-        const member = interaction.guild.members.cache.get(user[0]);
-        const name = member ? member.user.tag : "Unknown";
-        return `${index + 1}. ${name} — Level ${user[1].level}`;
-      })
-      .join("\n");
-
-    return interaction.reply({
-      content: `🏆 **XP Leaderboard**\n\n${leaderboard}`
-    });
+    const sorted = Object.entries(levelData).sort((a, b) => b[1].level - a[1].level).slice(0, 10);
+    if (sorted.length === 0) return interaction.reply("No data yet.");
+    const leaderboard = sorted.map((u, i) => {
+      const m = interaction.guild.members.cache.get(u[0]);
+      return `${i + 1}. ${m ? m.user.tag : "Unknown"} — Level ${u[1].level}`;
+    }).join("\n");
+    return interaction.reply({ content: `🏆 **XP Leaderboard**\n\n${leaderboard}` });
   }
 
   // RECRUIT LEADERBOARD
   if (interaction.commandName === "recruitleaderboard") {
-
-    const sorted = Object.entries(inviteData)
-      .sort((a, b) => b[1].invites - a[1].invites)
-      .slice(0, 10);
-
-    if (sorted.length === 0)
-      return interaction.reply("No recruitment data yet.");
-
-    const leaderboard = sorted
-      .map((user, index) => {
-        const member = interaction.guild.members.cache.get(user[0]);
-        const name = member ? member.user.tag : "Unknown";
-        return `${index + 1}. ${name} — ${user[1].invites} invites`;
-      })
-      .join("\n");
-
-    return interaction.reply({
-      content: `📈 **Recruitment Leaderboard**\n\n${leaderboard}`
-    });
+    const sorted = Object.entries(inviteData).sort((a, b) => b[1].invites - a[1].invites).slice(0, 10);
+    if (sorted.length === 0) return interaction.reply("No recruitment data yet.");
+    const leaderboard = sorted.map((u, i) => {
+      const m = interaction.guild.members.cache.get(u[0]);
+      return `${i + 1}. ${m ? m.user.tag : "Unknown"} — ${u[1].invites} invites`;
+    }).join("\n");
+    return interaction.reply({ content: `📈 **Recruitment Leaderboard**\n\n${leaderboard}` });
   }
+
   // MY INVITES
   if (interaction.commandName === "myinvites") {
-
     const data = inviteData[interaction.user.id];
-
-    if (!data)
-      return interaction.reply({ content: "You have 0 invites.", ephemeral: true });
-
-    return interaction.reply({
-      content: `📊 You have invited ${data.invites} member(s).`,
-      ephemeral: true
-    });
+    if (!data) return interaction.reply({ content: "You have 0 invites.", ephemeral: true });
+    return interaction.reply({ content: `📊 You have invited ${data.invites} member(s).`, ephemeral: true });
   }
 
-// CLAIM COMMAND LOGIC
+  // CLAIM
   if (interaction.commandName === "claim") {
-
     if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
       return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
 
     const embed = new EmbedBuilder()
       .setTitle("Ticket Claimed")
-      .setDescription(`${interaction.user} has claimed this ticket. If you need anything you can ask them.`)
+      .setDescription(`${interaction.user} has claimed this ticket.`)
       .setColor("#2A5CFF")
       .setTimestamp();
-
     await interaction.reply({ embeds: [embed] });
   }
 
   // CLOSE
   if (interaction.commandName === "close") {
-
     if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
       return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
 
     const reason = interaction.options.getString("reason");
     const channel = interaction.channel;
     const channelName = channel.name;
-
-    // Fetch last 100 messages
     const fetched = await channel.messages.fetch({ limit: 100 });
-    const transcript = fetched
-      .reverse()
-      .map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`)
-      .join("\n");
+    const transcript = fetched.reverse().map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`).join("\n");
 
-    // Determine ticket type from channel name
     let ticketType = "Ticket";
     if (channelName.includes("general")) ticketType = "General Support";
     else if (channelName.includes("ia")) ticketType = "Internal Affairs";
     else if (channelName.includes("mgmt")) ticketType = "Management Support";
-    else if (channelName.includes("designer")) ticketType = "Designer Application";
 
-    // Find who opened the ticket by finding the first non-bot message
     const opener = fetched.last()?.author ?? interaction.user;
-
     const transcriptEmbed = new EmbedBuilder()
       .setTitle(`${ticketType} - ${opener.tag}`)
-      .setDescription(
-        `**Closed by:** ${interaction.user}\n**Reason:** ${reason}\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``
-      )
+      .setDescription(`**Closed by:** ${interaction.user}\n**Reason:** ${reason}\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``)
       .setColor("#2A5CFF")
       .setTimestamp();
 
     const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
     if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
-
     await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
-
-    setTimeout(() => {
-      channel.delete().catch(() => {});
-    }, 2000);
+    setTimeout(() => channel.delete().catch(() => {}), 2000);
   }
 
-  // CLOSE REQUEST
+  // CLOSEREQ
   if (interaction.commandName === "closereq") {
-
     if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
       return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
 
@@ -1349,416 +1036,259 @@ setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
       .setTimestamp();
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`closereq_yes_${interaction.user.id}`)
-        .setLabel("Yes")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`closereq_no_${interaction.user.id}`)
-        .setLabel("No")
-        .setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId(`closereq_yes_${interaction.user.id}`).setLabel("Yes").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`closereq_no_${interaction.user.id}`).setLabel("No").setStyle(ButtonStyle.Danger)
     );
-
     await interaction.reply({ embeds: [embed], components: [row] });
   }
-  
 });
 
 // ===== REGISTER SLASH COMMANDS =====
 const rest = new REST({ version: "10" }).setToken(TOKEN);
-
 (async () => {
   try {
     console.log("🔄 Refreshing application (/) commands...");
-
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands.map(cmd => cmd.toJSON()) }
-    );
-
+    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands.map(cmd => cmd.toJSON()) });
     console.log("✅ Slash commands registered.");
   } catch (error) {
     console.error(error);
   }
 })();
 
-// ===== READY =====
-
+// ===== BUTTON & SELECT MENU INTERACTIONS =====
 client.on("interactionCreate", async interaction => {
+  if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
 
-if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
+  // ===== APPLICATION APPROVE/DENY =====
+  if (interaction.isButton() && interaction.customId.startsWith("appv2_")) {
+    const isMod = interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id));
+    if (!isMod) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
 
-// ===== DESIGNER APPLICATION APPROVE/DENY =====
-if (interaction.isButton() && interaction.customId.startsWith("app_")) {
+    const parts = interaction.customId.split("_");
+    const action = parts[1];
+    const userId = parts[2];
 
-  const isMod = interaction.member.roles.cache.some(role =>
-    MOD_ROLE_ID.includes(role.id)
-  );
+    const targetUser = await client.users.fetch(userId).catch(() => null);
 
-  if (!isMod) {
-    return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-  }
-
-  const parts = interaction.customId.split("_");
-  const action = parts[1];
-  const userId = parts[2];
-
-  const member = await interaction.guild.members.fetch(userId).catch(() => null);
-
-  if (!member) {
-    return interaction.reply({ content: "User not found.", ephemeral: true });
-  }
-
-  if (action === "approve") {
-  const member = await interaction.guild.members.fetch(userId).catch(() => null);
-
-  if (member) {
-    member.send("You have been accepted! Welcome aboard!").catch(() => {});
-  }
-
-  return interaction.update({
-    content: `✅ Approved by ${interaction.user.tag}`,
-    components: []
-  });
-}
-
-  // DENY
- if (action === "deny") {
-  const member = await interaction.guild.members.fetch(userId).catch(() => null);
-
-  if (member) {
-    member.send(
-      "You were not selected for the Designer Team. You may re-apply in 72 hours."
-    ).catch(() => {});
-  }
-
-  return interaction.update({
-      content: `❌ Denied by ${interaction.user.tag}`,
-      components: []
-    });
-  }
-
-} // closes app_ block
-
-// ===== BOT APPROVAL SYSTEM =====
-if (interaction.isButton() && interaction.customId.startsWith("bot_")) {
-
-  const isMod = interaction.member.roles.cache.some(role =>
-    MOD_ROLE_ID.includes(role.id)
-  );
-
-  if (!isMod) {
-    return interaction.reply({
-      content: "❌ Only moderators can use this.",
-      ephemeral: true
-    });
-  }
-
-  const [action, type, userId] = interaction.customId.split("_");
-
-  if (action === "bot" && type === "deny") {
-
-    const member = await interaction.guild.members.fetch(userId).catch(() => null);
-
-    if (!member) {
-      return interaction.reply({ content: "Bot not found.", ephemeral: true });
+    if (action === "approve") {
+      const member = await interaction.guild.members.fetch(userId).catch(() => null);
+      if (member) {
+        await member.roles.add(DESIGNER_ROLE_ID).catch(() => {});
+        await targetUser?.send(
+          "Congratulations on passing the Designer Application! Welcome to our team and we can't wait for you to start. You can view all information in the staff channel and if you have any questions ask a Senior Designer or the Lead Designer."
+        ).catch(() => {});
+      }
+      return interaction.update({ content: `✅ Approved by ${interaction.user.tag}`, components: [] });
     }
 
-    await member.kick("Bot denied by moderator").catch(() => {});
-
-    await interaction.update({
-      content: `❌ Bot ${member.user.tag} was denied and kicked by ${interaction.user.tag}`,
-      embeds: [],
-      components: []
-    });
+    if (action === "deny") {
+      await targetUser?.send(
+        "Unfortunately you have not been selected to join the Designer Team. You can re-apply in 72 hours if you would like."
+      ).catch(() => {});
+      return interaction.update({ content: `❌ Denied by ${interaction.user.tag}`, components: [] });
+    }
   }
 
-  if (action === "bot" && type === "confirm") {
+  // ===== BOT APPROVAL =====
+  if (interaction.isButton() && interaction.customId.startsWith("bot_")) {
+    const isMod = interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id));
+    if (!isMod) return interaction.reply({ content: "❌ Only moderators can use this.", ephemeral: true });
 
-    const member = await interaction.guild.members.fetch(userId).catch(() => null);
+    const [action, type, userId] = interaction.customId.split("_");
 
-    if (!member) {
-      return interaction.reply({ content: "Bot not found.", ephemeral: true });
+    if (action === "bot" && type === "deny") {
+      const member = await interaction.guild.members.fetch(userId).catch(() => null);
+      if (!member) return interaction.reply({ content: "Bot not found.", ephemeral: true });
+      await member.kick("Bot denied by moderator").catch(() => {});
+      await interaction.update({ content: `❌ Bot ${member.user.tag} was denied and kicked by ${interaction.user.tag}`, embeds: [], components: [] });
     }
 
-    await interaction.update({
-      content: `✅ Bot ${member.user.tag} was approved by ${interaction.user.tag}`,
-      embeds: [],
-      components: []
-    });
-  }
-}
-
-// === CLAIM TICKET === //
-if (interaction.customId === "claim_ticket") {
-
-  if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE)) {
-    return interaction.reply({ content: "❌ Only ticket staff can claim tickets.", ephemeral: true });
+    if (action === "bot" && type === "confirm") {
+      const member = await interaction.guild.members.fetch(userId).catch(() => null);
+      if (!member) return interaction.reply({ content: "Bot not found.", ephemeral: true });
+      await interaction.update({ content: `✅ Bot ${member.user.tag} was approved by ${interaction.user.tag}`, embeds: [], components: [] });
+    }
   }
 
-  const claimEmbed = new EmbedBuilder()
-    .setTitle("**Ticket Claimed**")
-    .setDescription(`Your ticket has been claimed by ${interaction.user.tag}`)
-    .setColor("#2b2d31")
-    .setTimestamp();
+  // ===== CLAIM TICKET =====
+  if (interaction.customId === "claim_ticket") {
+    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
+      return interaction.reply({ content: "❌ Only ticket staff can claim tickets.", ephemeral: true });
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("close_ticket")
-      .setLabel("Close")
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId("claim_ticket")
-      .setLabel("Claimed")
-      .setStyle(ButtonStyle.Success)
-      .setDisabled(true)
-  );
+    const claimEmbed = new EmbedBuilder()
+      .setTitle("**Ticket Claimed**")
+      .setDescription(`Your ticket has been claimed by ${interaction.user.tag}`)
+      .setColor("#2b2d31")
+      .setTimestamp();
 
-  await interaction.message.edit({ embeds: [claimEmbed], components: [row] });
-
-  const oldName = interaction.channel.name;
-  let newName = oldName.replace("🔴-", "");
-  newName = `🟢-${newName}`;
-
-  await interaction.channel.setName(newName).catch(() => {});
-
-  await interaction.deferUpdate();
-} // ✅ closes claim_ticket
-  
-/* OPEN TICKET */
-
-if (
-  (interaction.isStringSelectMenu() && interaction.customId === "ticket_select") ||
-  interaction.customId === "general_ticket" ||
-  interaction.customId === "ia_ticket" ||
-  interaction.customId === "mgmt_ticket" ||
-  interaction.customId === "designer_ticket"
-)
-{
-
-const user = interaction.user;
-const guild = interaction.guild;
-
-let type;
-
-if (interaction.isStringSelectMenu()) {
-  type = interaction.values[0];
-} else {
-  type = interaction.customId;
-}
-
-let name;
-let title;
-
-const cleanName = user.username.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-if (type === "general_ticket") {
-name = `🔴-general-${cleanName}`;
-title = "General Support";
-}
-
-if (type === "ia_ticket") {
-name = `🔴-ia-${cleanName}`;
-title = "Internal Affairs Support";
-}
-
-if (type === "mgmt_ticket") {
-name = `🔴-mgmt-${cleanName}`;
-title = "Management Support";
-}
-
-if (type === "designer_ticket") {
-  name = `🔴-designer-${cleanName}`;
-  title = "Designer Application";
-}
-
-const channel = await guild.channels.create({
-name: name,
-type: ChannelType.GuildText,
-parent: TICKET_CATEGORY,
-
-permissionOverwrites: [
-
-{
-id: guild.id,
-deny: [PermissionsBitField.Flags.ViewChannel]
-},
-
-{
-id: user.id,
-allow: [
-PermissionsBitField.Flags.ViewChannel,
-PermissionsBitField.Flags.SendMessages
-]
-},
-
-{
-id: TICKET_SUPPORT_ROLE,
-allow: [
-PermissionsBitField.Flags.ViewChannel,
-PermissionsBitField.Flags.SendMessages
-]
-}
-
-]
-});
-
-let ticketDescription;
-
-if (type === "designer_ticket") {
-  ticketDescription = "Thank you for opening an application! Please answer the following questions and send any images that showcase your previous work.\n\n" +
-    "**Please provide:**\n" +
-    "<:CF11:1488888964755492944> Q1 - What is your Roblox Username?\n" +
-    "<:CF11:1488888964755492944> Q2 - What is your main skill? GFX, Liveries, etc.\n" +
-    "<:CF11:1488888964755492944> Q3 - Please provide a portfolio or images of previous work.\n";
-} else if (type === "mgmt_ticket") {
-  ticketDescription = "Thank you for opening a ticket, a HR member will be with you shortly. Please explain why you opened the ticket while waiting.";
-} else if (type === "ia_ticket") {
-  ticketDescription = "Thank you for opening a ticket, a IA member will be with you shortly. Please explain why you opened the ticket while waiting.";
-} else if (type === "general_ticket") {
-  ticketDescription = "Thank you for opening a ticket, a staff member will be with you shortly. If you could provide the reason why you opened it while waiting that would be great, thanks.";
-}
-
-const embed = new EmbedBuilder()
-.setTitle(title)
-.setDescription(ticketDescription)
-.setColor("#2A5CFF")
-.setTimestamp();
-
-const buttons = new ActionRowBuilder().addComponents(
-
-new ButtonBuilder()
-.setCustomId("close_ticket")
-.setLabel("Close")
-.setStyle(ButtonStyle.Danger),
-
-new ButtonBuilder()
-.setCustomId("claim_ticket")
-.setLabel("Claim")
-.setStyle(ButtonStyle.Success)
-
-);
-
-channel.send({
-embeds: [embed],
-components: [buttons]
-});
-
-interaction.reply({
-content: `Ticket created: ${channel}`,
-ephemeral: true
-});
-}
-
-/* CLOSE TICKET */
-
-if (interaction.customId === "close_ticket") {
-
-  if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE)) {
-    return interaction.reply({
-      content: "❌ Only ticket staff can close tickets.",
-      ephemeral: true
-    });
-  }
-
-  const channel = interaction.channel;
-  const channelName = channel.name;
-
-  const fetched = await channel.messages.fetch({ limit: 100 });
-  const transcript = fetched
-    .reverse()
-    .map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`)
-    .join("\n");
-
-  let ticketType = "Ticket";
-  if (channelName.includes("general")) ticketType = "General Support";
-  else if (channelName.includes("ia")) ticketType = "Internal Affairs";
-  else if (channelName.includes("mgmt")) ticketType = "Management Support";
-  else if (channelName.includes("designer")) ticketType = "Designer Application";
-
-  const opener = fetched.last()?.author ?? interaction.user;
-
-  const transcriptEmbed = new EmbedBuilder()
-    .setTitle(`${ticketType} - ${opener.tag}`)
-    .setDescription(
-      `**Closed by:** ${interaction.user}\n**Reason:** Button close\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``
-    )
-    .setColor("#2A5CFF")
-    .setTimestamp();
-
-  const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
-  if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
-
-  await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
-
-  setTimeout(() => {
-    channel.delete().catch(() => {});
-  }, 2000);
-}
-
-// CLOSE REQUEST BUTTONS
-if (interaction.isButton() && interaction.customId.startsWith("closereq_")) {
-
-  const parts = interaction.customId.split("_");
-  const answer = parts[1];
-  const staffId = parts[2];
-
-  if (answer === "yes") {
-    await interaction.update({ components: [] });
-    await interaction.channel.send(
-      `<@${staffId}> ${interaction.user.username} has chosen to close this ticket. Please proceed.`
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("claim_ticket").setLabel("Claimed").setStyle(ButtonStyle.Success).setDisabled(true)
     );
+
+    await interaction.message.edit({ embeds: [claimEmbed], components: [row] });
+    await interaction.channel.setName(`🟢-${interaction.channel.name.replace("🔴-", "")}`).catch(() => {});
+    await interaction.deferUpdate();
   }
 
-  if (answer === "no") {
-    await interaction.update({ components: [] });
-    await interaction.channel.send(
-      `<@${staffId}> ${interaction.user.username} has chosen to continue in the ticket.`
+  // ===== OPEN TICKET =====
+  if (
+    (interaction.isStringSelectMenu() && interaction.customId === "ticket_select") ||
+    interaction.customId === "general_ticket" ||
+    interaction.customId === "ia_ticket" ||
+    interaction.customId === "mgmt_ticket"
+  ) {
+    const user = interaction.user;
+    const guild = interaction.guild;
+    const type = interaction.isStringSelectMenu() ? interaction.values[0] : interaction.customId;
+    const cleanName = user.username.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    let name, title, ticketDescription;
+
+    if (type === "general_ticket") {
+      name = `🔴-general-${cleanName}`;
+      title = "General Support";
+      ticketDescription = "Thank you for opening a ticket, a staff member will be with you shortly. If you could provide the reason why you opened it while waiting that would be great, thanks.";
+    }
+    if (type === "ia_ticket") {
+      name = `🔴-ia-${cleanName}`;
+      title = "Internal Affairs Support";
+      ticketDescription = "Thank you for opening a ticket, an IA member will be with you shortly. Please explain why you opened the ticket while waiting.";
+    }
+    if (type === "mgmt_ticket") {
+      name = `🔴-mgmt-${cleanName}`;
+      title = "Management Support";
+      ticketDescription = "Thank you for opening a ticket, a HR member will be with you shortly. Please explain why you opened the ticket while waiting.";
+    }
+
+    const channel = await guild.channels.create({
+      name, type: ChannelType.GuildText, parent: TICKET_CATEGORY,
+      permissionOverwrites: [
+        { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+        { id: user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+        { id: TICKET_SUPPORT_ROLE, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+      ]
+    });
+
+    const embed = new EmbedBuilder().setTitle(title).setDescription(ticketDescription).setColor("#2A5CFF").setTimestamp();
+    const buttons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("claim_ticket").setLabel("Claim").setStyle(ButtonStyle.Success)
     );
-  }
-}
 
+    channel.send({ embeds: [embed], components: [buttons] });
+    interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
+  }
+
+  // ===== CLOSE TICKET =====
+  if (interaction.customId === "close_ticket") {
+    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
+      return interaction.reply({ content: "❌ Only ticket staff can close tickets.", ephemeral: true });
+
+    const channel = interaction.channel;
+    const channelName = channel.name;
+    const fetched = await channel.messages.fetch({ limit: 100 });
+    const transcript = fetched.reverse().map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`).join("\n");
+
+    let ticketType = "Ticket";
+    if (channelName.includes("general")) ticketType = "General Support";
+    else if (channelName.includes("ia")) ticketType = "Internal Affairs";
+    else if (channelName.includes("mgmt")) ticketType = "Management Support";
+
+    const opener = fetched.last()?.author ?? interaction.user;
+    const transcriptEmbed = new EmbedBuilder()
+      .setTitle(`${ticketType} - ${opener.tag}`)
+      .setDescription(`**Closed by:** ${interaction.user}\n**Reason:** Button close\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``)
+      .setColor("#2A5CFF")
+      .setTimestamp();
+
+    const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
+    if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
+    await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
+    setTimeout(() => channel.delete().catch(() => {}), 2000);
+  }
+
+  // ===== CLOSE REQUEST BUTTONS =====
+  if (interaction.isButton() && interaction.customId.startsWith("closereq_")) {
+    const parts = interaction.customId.split("_");
+    const answer = parts[1];
+    const staffId = parts[2];
+
+    if (answer === "yes") {
+      await interaction.update({ components: [] });
+      await interaction.channel.send(`<@${staffId}> ${interaction.user.username} has chosen to close this ticket. Please proceed.`);
+    }
+    if (answer === "no") {
+      await interaction.update({ components: [] });
+      await interaction.channel.send(`<@${staffId}> ${interaction.user.username} has chosen to continue in the ticket.`);
+    }
+  }
 });
 
+// ===== ANTI NUKE EVENTS =====
 client.on("channelDelete", async channel => {
   const guild = channel.guild;
   if (!guild) return;
-
   const logs = await guild.fetchAuditLogs({ type: 12, limit: 1 });
   const entry = logs.entries.first();
   if (!entry) return;
-
   const executorId = entry.executor?.id;
   if (!executorId) return;
-
   trackNukeAction(guild, executorId, "Channel Deletion");
+});
+
+client.on("channelCreate", async channel => {
+  const guild = channel.guild;
+  if (!guild) return;
+  const logs = await guild.fetchAuditLogs({ type: 10, limit: 1 });
+  const entry = logs.entries.first();
+  if (!entry) return;
+  const executorId = entry.executor?.id;
+  if (!executorId) return;
+  trackNukeAction(guild, executorId, "Mass Channel Creation");
 });
 
 client.on("guildBanAdd", async ban => {
   const guild = ban.guild;
-
   const logs = await guild.fetchAuditLogs({ type: 22, limit: 1 });
   const entry = logs.entries.first();
   if (!entry) return;
-
   const executorId = entry.executor?.id;
   if (!executorId) return;
-
   trackNukeAction(guild, executorId, "Mass Ban Activity");
 });
 
 client.on("roleDelete", async role => {
   const guild = role.guild;
-
   const logs = await guild.fetchAuditLogs({ type: 32, limit: 1 });
   const entry = logs.entries.first();
   if (!entry) return;
-
   const executorId = entry.executor?.id;
   if (!executorId) return;
-
   trackNukeAction(guild, executorId, "Role Deletion");
-  
+});
+
+client.on("roleCreate", async role => {
+  const guild = role.guild;
+  const logs = await guild.fetchAuditLogs({ type: 30, limit: 1 });
+  const entry = logs.entries.first();
+  if (!entry) return;
+  const executorId = entry.executor?.id;
+  if (!executorId) return;
+  trackNukeAction(guild, executorId, "Mass Role Creation");
+});
+
+client.on("webhookUpdate", async channel => {
+  const guild = channel.guild;
+  if (!guild) return;
+  const logs = await guild.fetchAuditLogs({ type: 50, limit: 1 });
+  const entry = logs.entries.first();
+  if (!entry) return;
+  const executorId = entry.executor?.id;
+  if (!executorId) return;
+  const webhooks = await channel.fetchWebhooks().catch(() => null);
+  if (webhooks) webhooks.forEach(wh => wh.delete("Anti-nuke: unauthorized webhook").catch(() => {}));
+  trackNukeAction(guild, executorId, "Webhook Creation");
 });
 
 client.login(TOKEN);
