@@ -10,7 +10,8 @@ const {
   ButtonStyle,
   StringSelectMenuBuilder,
   PermissionsBitField,
-  ChannelType
+  ChannelType,
+  Partials  // ✅ FIX 1: Import Partials enum
 } = require('discord.js');
 
 const fs = require("fs");
@@ -93,6 +94,8 @@ function addLog(userId, type, moderator, reason) {
 const applicationSessions = new Map();
 
 // ===== CLIENT =====
+// ✅ FIX 2: Use proper Partials enum values — string-based partials silently fail in discord.js v14
+//            and DMs will never be received without Partials.Channel
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -100,9 +103,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildModeration
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildInvites  // ✅ FIX 3: Required for invite tracking/caching to work reliably
   ],
-  partials: ["CHANNEL", "MESSAGE"]
+  partials: [Partials.Channel, Partials.Message]  // ✅ FIX: was ["CHANNEL", "MESSAGE"] which does nothing in v14
 });
 
 // ===== INVITE CACHE =====
@@ -334,6 +338,7 @@ const messageTracker = new Map();
 const SPAM_LIMIT = 5;
 const SPAM_TIME = 3000;
 
+// ===== MESSAGE CREATE — GUILD (Automod + Levels) =====
 client.on("messageCreate", async message => {
   if (!message.guild || message.author.bot) return;
 
@@ -441,19 +446,38 @@ client.on("messageCreate", async message => {
       return;
     }
   }
+
+  // ===== LEVEL SYSTEM =====
+  if (!levelData[message.author.id]) levelData[message.author.id] = { xp: 0, level: 1 };
+  const userLevel = levelData[message.author.id];
+  const MAX_LEVEL = 100;
+  if (userLevel.level < MAX_LEVEL) {
+    userLevel.xp += Math.floor(Math.random() * 10) + 5;
+    const requiredXP = userLevel.level * 100;
+    if (userLevel.xp >= requiredXP) {
+      userLevel.xp -= requiredXP;
+      userLevel.level += 1;
+      message.channel.send(`🎉 ${message.author} leveled up to Level ${userLevel.level}!`);
+    }
+    saveLevels();
+  }
 });
 
-// ===== DM APPLICATION SYSTEM =====
+// ===== MESSAGE CREATE — DMs (Application System) =====
+// ✅ FIX 4: Kept as a separate listener but now works because Partials.Channel is properly set.
+//            The DM listener is intentionally separate from guild messages — no issue with having both.
 client.on("messageCreate", async message => {
   if (message.guild) return; // only DMs
   if (message.author.bot) return;
 
   const userId = message.author.id;
   const session = applicationSessions.get(userId);
+  // ✅ FIX 5: Trim and lowercase for reliable matching — trailing spaces/newlines won't break it
   const content = message.content.trim();
+  const contentLower = content.toLowerCase();
 
   // Trigger: user says "apply"
-  if (!session && content.toLowerCase() === "apply") {
+  if (!session && contentLower === "apply") {
     applicationSessions.set(userId, { state: "instructions", answers: [] });
 
     const instructionsEmbed = new EmbedBuilder()
@@ -471,7 +495,7 @@ client.on("messageCreate", async message => {
   }
 
   // User says "ready" — send questions
-  if (session && session.state === "instructions" && content.toLowerCase() === "ready") {
+  if (session && session.state === "instructions" && contentLower === "ready") {
     session.state = "awaiting_answers";
     session.answers = [];
     applicationSessions.set(userId, session);
@@ -500,14 +524,14 @@ client.on("messageCreate", async message => {
   }
 
   // Collecting answers
-  if (session && session.state === "awaiting_answers" && content.toLowerCase() !== "done") {
+  if (session && session.state === "awaiting_answers" && contentLower !== "done") {
     session.answers.push(content);
     applicationSessions.set(userId, session);
     return;
   }
 
   // User says "done" — prompt for images
-  if (session && session.state === "awaiting_answers" && content.toLowerCase() === "done") {
+  if (session && session.state === "awaiting_answers" && contentLower === "done") {
     session.state = "awaiting_images";
     applicationSessions.set(userId, session);
 
@@ -567,28 +591,6 @@ client.on("messageCreate", async message => {
     applicationSessions.delete(userId);
     return;
   }
-});
-
-// ===== LEVEL SYSTEM =====
-const MAX_LEVEL = 100;
-
-client.on("messageCreate", async message => {
-  if (!message.guild || message.author.bot) return;
-
-  if (!levelData[message.author.id]) levelData[message.author.id] = { xp: 0, level: 1 };
-  const user = levelData[message.author.id];
-  if (user.level >= MAX_LEVEL) return;
-
-  user.xp += Math.floor(Math.random() * 10) + 5;
-  const requiredXP = user.level * 100;
-
-  if (user.xp >= requiredXP) {
-    user.xp -= requiredXP;
-    user.level += 1;
-    message.channel.send(`🎉 ${message.author} leveled up to Level ${user.level}!`);
-  }
-
-  saveLevels();
 });
 
 // ===== SLASH COMMANDS =====
@@ -685,378 +687,384 @@ function trackNukeAction(guild, userId, reason) {
   antiNukeTracker.set(userId, data);
 }
 
-// ===== SLASH COMMAND HANDLER =====
+// ===== UNIFIED INTERACTION HANDLER =====
+// ✅ FIX 6: Merged both interactionCreate listeners into one to prevent race conditions
+//            where both handlers fire simultaneously and can double-respond to an interaction.
 client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand()) return;
 
-  // VERIFY
-  if (interaction.commandName === "verify") {
-    if (interaction.channelId !== VERIFY_CHANNEL_ID)
-      return interaction.reply({ content: "❌ Use this in verify channel.", ephemeral: true });
+  // ===== SLASH COMMANDS =====
+  if (interaction.isChatInputCommand()) {
 
-    const member = await interaction.guild.members.fetch(interaction.user.id);
-    if (!member.roles.cache.has(UNVERIFIED_ROLE))
-      return interaction.reply({ content: "❌ Already verified.", ephemeral: true });
+    // VERIFY
+    if (interaction.commandName === "verify") {
+      if (interaction.channelId !== VERIFY_CHANNEL_ID)
+        return interaction.reply({ content: "❌ Use this in verify channel.", ephemeral: true });
 
-    await member.roles.remove(UNVERIFIED_ROLE);
-    for (const role of VERIFIED_ROLES) await member.roles.add(role);
-    return interaction.reply({ content: "✅ Verified!", ephemeral: true });
-  }
+      const member = await interaction.guild.members.fetch(interaction.user.id);
+      if (!member.roles.cache.has(UNVERIFIED_ROLE))
+        return interaction.reply({ content: "❌ Already verified.", ephemeral: true });
 
-  // PROMOTE
-  if (interaction.commandName === "promote") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const user = interaction.options.getUser("user");
-    const role = interaction.options.getRole("role");
-    const reason = interaction.options.getString("reason") || "No reason provided";
-    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-    if (!member) return interaction.reply({ content: "User not found in server.", ephemeral: true });
-
-    await member.roles.add(role).catch(() => {});
-    addLog(member.id, "Promotion", interaction.user.tag, reason);
-
-    const embed = new EmbedBuilder()
-      .setTitle("Staff Promotion")
-      .setDescription(`Congratulations! ${member} has been promoted by ${interaction.user}.`)
-      .addFields(
-        { name: "Staff Member", value: `${member}`, inline: false },
-        { name: "New Rank", value: `${role}`, inline: false },
-        { name: "Reason", value: `${reason}`, inline: false }
-      )
-      .setColor("#f1c40f")
-      .setThumbnail(member.user.displayAvatarURL())
-      .setFooter({ text: `Promotion issued by ${interaction.user.tag}` })
-      .setTimestamp();
-
-    const channel = interaction.guild.channels.cache.get("1489097136929902624");
-    if (channel) channel.send({ content: `${member}`, embeds: [embed] });
-    return interaction.reply({ content: "✅ Promotion sent.", ephemeral: true });
-  }
-
-  // DEMOTE
-  if (interaction.commandName === "demote") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const member = interaction.options.getMember("user");
-    const demotedRole = interaction.options.getRole("demoted_to");
-    const removeRole = interaction.options.getRole("remove_role");
-    const reason = interaction.options.getString("reason");
-
-    await member.roles.remove(removeRole).catch(() => {});
-    await member.roles.add(demotedRole).catch(() => {});
-    addLog(member.id, "Demotion", interaction.user.tag, reason);
-
-    const embed = new EmbedBuilder()
-      .setTitle("<:florida2:1478801582056538305> Demotion")
-      .setDescription(`${member} has been demoted to ${demotedRole}.`)
-      .addFields(
-        { name: "Person", value: `${member}`, inline: false },
-        { name: "New Role", value: `${demotedRole}`, inline: false },
-        { name: "Reason", value: `${reason}`, inline: false }
-      )
-      .setColor("#2b2d31")
-      .setThumbnail(member.user.displayAvatarURL())
-      .setFooter({ text: `Demoted by ${interaction.user.tag}` })
-      .setTimestamp();
-
-    const channel = interaction.guild.channels.cache.get("1489097083029033060");
-    if (channel) channel.send({ content: `${member}`, embeds: [embed] });
-    return interaction.reply({ content: "✅ Demotion sent.", ephemeral: true });
-  }
-
-  // WARN
-  if (interaction.commandName === "warn") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const user = interaction.options.getUser("user");
-    const reason = interaction.options.getString("reason");
-    addLog(user.id, "Warning", interaction.user.tag, reason);
-    await interaction.reply({ content: `⚠️ ${user.tag} warned.` });
-    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
-  }
-
-  // LOGS
-  if (interaction.commandName === "logs") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const user = interaction.options.getUser("user");
-    const logs = playerLogs[user.id];
-    if (!logs || logs.length === 0)
-      return interaction.reply({ content: "No logs found.", ephemeral: true });
-
-    const formatted = logs.map(l => `• [${l.date}] ${l.type} | ${l.moderator} | ${l.reason}`).join("\n");
-    return interaction.reply({ content: formatted, ephemeral: true });
-  }
-
-  // CLEAR LOGS
-  if (interaction.commandName === "clearlogs") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const user = interaction.options.getUser("user");
-    playerLogs[user.id] = [];
-    saveLogs();
-    await interaction.reply({ content: `🧹 Logs cleared.` });
-    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
-  }
-
-  // STRIKE
-  if (interaction.commandName === "strike") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const user = interaction.options.getUser("user");
-    const reason = interaction.options.getString("reason");
-    const member = interaction.guild.members.cache.get(user.id);
-
-    if (!strikeData[user.id]) strikeData[user.id] = 0;
-    strikeData[user.id] += 1;
-    saveStrikes();
-    const strikes = strikeData[user.id];
-
-    const embed = new EmbedBuilder()
-      .setTitle("<:dh:1487558730642882861> Strike")
-      .setDescription(`${user} has been issued a strike by ${interaction.user}.`)
-      .addFields(
-        { name: "> User", value: `${user}`, inline: false },
-        { name: "> Punishment", value: `Strike ${strikes}`, inline: false },
-        { name: "> Reason", value: `${reason}`, inline: false }
-      )
-      .setColor("#2b2d31")
-      .setThumbnail(user.displayAvatarURL())
-      .setFooter({ text: `Strike issued by ${interaction.user.tag}` })
-      .setTimestamp();
-
-    const channel = interaction.guild.channels.cache.get("1489097083029033060");
-    if (channel) channel.send({ content: `${user}`, embeds: [embed] });
-    await interaction.reply({ content: "✅ Strike issued.", ephemeral: true });
-
-    if (strikes === 5 && member) {
-      await member.ban({ reason: "5 Strikes - 48 Hour Temp Ban" });
-      setTimeout(() => interaction.guild.members.unban(user.id).catch(() => {}), 48 * 60 * 60 * 1000);
+      await member.roles.remove(UNVERIFIED_ROLE);
+      for (const role of VERIFIED_ROLES) await member.roles.add(role);
+      return interaction.reply({ content: "✅ Verified!", ephemeral: true });
     }
+
+    // PROMOTE
+    if (interaction.commandName === "promote") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const role = interaction.options.getRole("role");
+      const reason = interaction.options.getString("reason") || "No reason provided";
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+      if (!member) return interaction.reply({ content: "User not found in server.", ephemeral: true });
+
+      await member.roles.add(role).catch(() => {});
+      addLog(member.id, "Promotion", interaction.user.tag, reason);
+
+      const embed = new EmbedBuilder()
+        .setTitle("Staff Promotion")
+        .setDescription(`Congratulations! ${member} has been promoted by ${interaction.user}.`)
+        .addFields(
+          { name: "Staff Member", value: `${member}`, inline: false },
+          { name: "New Rank", value: `${role}`, inline: false },
+          { name: "Reason", value: `${reason}`, inline: false }
+        )
+        .setColor("#f1c40f")
+        .setThumbnail(member.user.displayAvatarURL())
+        .setFooter({ text: `Promotion issued by ${interaction.user.tag}` })
+        .setTimestamp();
+
+      const channel = interaction.guild.channels.cache.get("1489097136929902624");
+      if (channel) channel.send({ content: `${member}`, embeds: [embed] });
+      return interaction.reply({ content: "✅ Promotion sent.", ephemeral: true });
+    }
+
+    // DEMOTE
+    if (interaction.commandName === "demote") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const member = interaction.options.getMember("user");
+      const demotedRole = interaction.options.getRole("demoted_to");
+      const removeRole = interaction.options.getRole("remove_role");
+      const reason = interaction.options.getString("reason");
+
+      await member.roles.remove(removeRole).catch(() => {});
+      await member.roles.add(demotedRole).catch(() => {});
+      addLog(member.id, "Demotion", interaction.user.tag, reason);
+
+      const embed = new EmbedBuilder()
+        .setTitle("<:florida2:1478801582056538305> Demotion")
+        .setDescription(`${member} has been demoted to ${demotedRole}.`)
+        .addFields(
+          { name: "Person", value: `${member}`, inline: false },
+          { name: "New Role", value: `${demotedRole}`, inline: false },
+          { name: "Reason", value: `${reason}`, inline: false }
+        )
+        .setColor("#2b2d31")
+        .setThumbnail(member.user.displayAvatarURL())
+        .setFooter({ text: `Demoted by ${interaction.user.tag}` })
+        .setTimestamp();
+
+      const channel = interaction.guild.channels.cache.get("1489097083029033060");
+      if (channel) channel.send({ content: `${member}`, embeds: [embed] });
+      return interaction.reply({ content: "✅ Demotion sent.", ephemeral: true });
+    }
+
+    // WARN
+    if (interaction.commandName === "warn") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const reason = interaction.options.getString("reason");
+      addLog(user.id, "Warning", interaction.user.tag, reason);
+      await interaction.reply({ content: `⚠️ ${user.tag} warned.` });
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    }
+
+    // LOGS
+    if (interaction.commandName === "logs") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const logs = playerLogs[user.id];
+      if (!logs || logs.length === 0)
+        return interaction.reply({ content: "No logs found.", ephemeral: true });
+
+      const formatted = logs.map(l => `• [${l.date}] ${l.type} | ${l.moderator} | ${l.reason}`).join("\n");
+      return interaction.reply({ content: formatted, ephemeral: true });
+    }
+
+    // CLEAR LOGS
+    if (interaction.commandName === "clearlogs") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      playerLogs[user.id] = [];
+      saveLogs();
+      await interaction.reply({ content: `🧹 Logs cleared.` });
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    }
+
+    // STRIKE
+    if (interaction.commandName === "strike") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const reason = interaction.options.getString("reason");
+      // ✅ FIX 7: Fetch member properly — interaction.options.getMember can return null
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+
+      if (!strikeData[user.id]) strikeData[user.id] = 0;
+      strikeData[user.id] += 1;
+      saveStrikes();
+      const strikes = strikeData[user.id];
+
+      const embed = new EmbedBuilder()
+        .setTitle("<:dh:1487558730642882861> Strike")
+        .setDescription(`${user} has been issued a strike by ${interaction.user}.`)
+        .addFields(
+          { name: "> User", value: `${user}`, inline: false },
+          { name: "> Punishment", value: `Strike ${strikes}`, inline: false },
+          { name: "> Reason", value: `${reason}`, inline: false }
+        )
+        .setColor("#2b2d31")
+        .setThumbnail(user.displayAvatarURL())
+        .setFooter({ text: `Strike issued by ${interaction.user.tag}` })
+        .setTimestamp();
+
+      const channel = interaction.guild.channels.cache.get("1489097083029033060");
+      if (channel) channel.send({ content: `${user}`, embeds: [embed] });
+      await interaction.reply({ content: "✅ Strike issued.", ephemeral: true });
+
+      // ✅ FIX 8: Wrapped auto-ban in try/catch — member may have left before the ban fires
+      if (strikes === 5 && member) {
+        try {
+          await member.ban({ reason: "5 Strikes - 48 Hour Temp Ban" });
+          setTimeout(() => interaction.guild.members.unban(user.id).catch(() => {}), 48 * 60 * 60 * 1000);
+        } catch (err) {
+          console.error("Strike auto-ban failed:", err);
+        }
+      }
+    }
+
+    // CHECK STRIKES
+    if (interaction.commandName === "strikes") {
+      const user = interaction.options.getUser("user");
+      return interaction.reply({ content: `${user.tag} has ${strikeData[user.id] || 0} strike(s).`, ephemeral: true });
+    }
+
+    // MUTE
+    if (interaction.commandName === "mute") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const member = interaction.options.getMember("user");
+      const minutes = interaction.options.getInteger("minutes");
+      await member.timeout(minutes * 60 * 1000);
+      return interaction.reply(`${member.user.tag} muted for ${minutes} minutes.`);
+    }
+
+    // CLEAR STRIKES
+    if (interaction.commandName === "clearstrikes") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      strikeData[user.id] = 0;
+      saveStrikes();
+      return interaction.reply({ content: `✅ Cleared all strikes for ${user.tag}.` });
+    }
+
+    // SLOWMODE
+    if (interaction.commandName === "slowmode") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const seconds = interaction.options.getInteger("seconds");
+      await interaction.channel.setRateLimitPerUser(seconds);
+      return interaction.reply(`Slowmode set to ${seconds} seconds.`);
+    }
+
+    // LOCKDOWN
+    if (interaction.commandName === "lockdown") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      interaction.guild.channels.cache.forEach(channel => {
+        if (channel.type === ChannelType.GuildText)
+          channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false }).catch(() => {});
+      });
+      return interaction.reply("🔒 Server lockdown enabled.");
+    }
+
+    // UNLOCKDOWN
+    if (interaction.commandName === "unlockdown") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      interaction.guild.channels.cache.forEach(channel => {
+        if (channel.type === ChannelType.GuildText)
+          channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: true }).catch(() => {});
+      });
+      return interaction.reply("🔓 Server lockdown removed.");
+    }
+
+    // BAN
+    if (interaction.commandName === "ban") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const reason = interaction.options.getString("reason") || "No reason provided";
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+      if (!member) return interaction.reply({ content: "User is not in this server.", ephemeral: true });
+
+      addLog(user.id, "Permanent Ban", interaction.user.tag, reason);
+      await member.ban({ reason });
+
+      const embed = new EmbedBuilder()
+        .setTitle(`${user.tag} | Ban`)
+        .setDescription(`Banned by ${interaction.user.tag}\nReason: ${reason}`)
+        .setColor(0xff0000)
+        .setTimestamp();
+
+      interaction.guild.channels.cache.get(BAN_LOG_CHANNEL)?.send({ embeds: [embed] });
+      await interaction.reply({ content: `${user.tag} banned.` });
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    }
+
+    // TEMP BAN
+    if (interaction.commandName === "tban") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const hours = interaction.options.getInteger("hours");
+      const reason = interaction.options.getString("reason");
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+      if (!member) return interaction.reply({ content: "User not found.", ephemeral: true });
+
+      await member.ban({ reason: `${reason} (${hours}h)` });
+      addLog(user.id, "Temp Ban", interaction.user.tag, reason);
+      // ✅ FIX 9: Wrapped temp ban unban in try/catch — guild or user may no longer be accessible
+      setTimeout(async () => {
+        try {
+          await interaction.guild.members.unban(user.id);
+        } catch (err) {
+          console.error("Temp ban unban failed:", err);
+        }
+      }, hours * 60 * 60 * 1000);
+      await interaction.reply({ content: `${user.tag} banned for ${hours} hours.` });
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    }
+
+    // MY LEVEL
+    if (interaction.commandName === "mylevel") {
+      const data = levelData[interaction.user.id];
+      if (!data) return interaction.reply({ content: "You have no XP yet.", ephemeral: true });
+      return interaction.reply({ content: `Level: ${data.level}\nXP: ${data.xp}/${data.level * 100}`, ephemeral: true });
+    }
+
+    // XP LEADERBOARD
+    if (interaction.commandName === "leaderboard") {
+      const sorted = Object.entries(levelData).sort((a, b) => b[1].level - a[1].level).slice(0, 10);
+      if (sorted.length === 0) return interaction.reply("No data yet.");
+      const leaderboard = sorted.map((u, i) => {
+        const m = interaction.guild.members.cache.get(u[0]);
+        return `${i + 1}. ${m ? m.user.tag : "Unknown"} — Level ${u[1].level}`;
+      }).join("\n");
+      return interaction.reply({ content: `🏆 **XP Leaderboard**\n\n${leaderboard}` });
+    }
+
+    // RECRUIT LEADERBOARD
+    if (interaction.commandName === "recruitleaderboard") {
+      const sorted = Object.entries(inviteData).sort((a, b) => b[1].invites - a[1].invites).slice(0, 10);
+      if (sorted.length === 0) return interaction.reply("No recruitment data yet.");
+      const leaderboard = sorted.map((u, i) => {
+        const m = interaction.guild.members.cache.get(u[0]);
+        return `${i + 1}. ${m ? m.user.tag : "Unknown"} — ${u[1].invites} invites`;
+      }).join("\n");
+      return interaction.reply({ content: `📈 **Recruitment Leaderboard**\n\n${leaderboard}` });
+    }
+
+    // MY INVITES
+    if (interaction.commandName === "myinvites") {
+      const data = inviteData[interaction.user.id];
+      if (!data) return interaction.reply({ content: "You have 0 invites.", ephemeral: true });
+      return interaction.reply({ content: `📊 You have invited ${data.invites} member(s).`, ephemeral: true });
+    }
+
+    // CLAIM
+    if (interaction.commandName === "claim") {
+      if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
+        return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
+
+      const embed = new EmbedBuilder()
+        .setTitle("Ticket Claimed")
+        .setDescription(`${interaction.user} has claimed this ticket.`)
+        .setColor("#2A5CFF")
+        .setTimestamp();
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // CLOSE
+    if (interaction.commandName === "close") {
+      if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
+        return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
+
+      const reason = interaction.options.getString("reason");
+      const channel = interaction.channel;
+      const channelName = channel.name;
+      const fetched = await channel.messages.fetch({ limit: 100 });
+      const transcript = fetched.reverse().map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`).join("\n");
+
+      let ticketType = "Ticket";
+      if (channelName.includes("general")) ticketType = "General Support";
+      else if (channelName.includes("ia")) ticketType = "Internal Affairs";
+      else if (channelName.includes("mgmt")) ticketType = "Management Support";
+
+      const opener = fetched.last()?.author ?? interaction.user;
+      const transcriptEmbed = new EmbedBuilder()
+        .setTitle(`${ticketType} - ${opener.tag}`)
+        .setDescription(`**Closed by:** ${interaction.user}\n**Reason:** ${reason}\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``)
+        .setColor("#2A5CFF")
+        .setTimestamp();
+
+      const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
+      if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
+      await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
+      setTimeout(() => channel.delete().catch(() => {}), 2000);
+    }
+
+    // CLOSEREQ
+    if (interaction.commandName === "closereq") {
+      if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
+        return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
+
+      const embed = new EmbedBuilder()
+        .setTitle("Close Request")
+        .setDescription("The ticket support would like to know whether or not you want to close the ticket.")
+        .setColor("#2A5CFF")
+        .setTimestamp();
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`closereq_yes_${interaction.user.id}`).setLabel("Yes").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`closereq_no_${interaction.user.id}`).setLabel("No").setStyle(ButtonStyle.Danger)
+      );
+      await interaction.reply({ embeds: [embed], components: [row] });
+    }
+
+    return; // end of slash command block
   }
 
-  // CHECK STRIKES
-  if (interaction.commandName === "strikes") {
-    const user = interaction.options.getUser("user");
-    return interaction.reply({ content: `${user.tag} has ${strikeData[user.id] || 0} strike(s).`, ephemeral: true });
-  }
-
-  // MUTE
-  if (interaction.commandName === "mute") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const member = interaction.options.getMember("user");
-    const minutes = interaction.options.getInteger("minutes");
-    await member.timeout(minutes * 60 * 1000);
-    return interaction.reply(`${member.user.tag} muted for ${minutes} minutes.`);
-  }
-
-  // CLEAR STRIKES
-  if (interaction.commandName === "clearstrikes") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const user = interaction.options.getUser("user");
-    strikeData[user.id] = 0;
-    saveStrikes();
-    return interaction.reply({ content: `✅ Cleared all strikes for ${user.tag}.` });
-  }
-
-  // SLOWMODE
-  if (interaction.commandName === "slowmode") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const seconds = interaction.options.getInteger("seconds");
-    await interaction.channel.setRateLimitPerUser(seconds);
-    return interaction.reply(`Slowmode set to ${seconds} seconds.`);
-  }
-
-  // LOCKDOWN
-  if (interaction.commandName === "lockdown") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    interaction.guild.channels.cache.forEach(channel => {
-      if (channel.type === ChannelType.GuildText)
-        channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false }).catch(() => {});
-    });
-    return interaction.reply("🔒 Server lockdown enabled.");
-  }
-
-  // UNLOCKDOWN
-  if (interaction.commandName === "unlockdown") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    interaction.guild.channels.cache.forEach(channel => {
-      if (channel.type === ChannelType.GuildText)
-        channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: true }).catch(() => {});
-    });
-    return interaction.reply("🔓 Server lockdown removed.");
-  }
-
-  // BAN
-  if (interaction.commandName === "ban") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const user = interaction.options.getUser("user");
-    const reason = interaction.options.getString("reason") || "No reason provided";
-    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-    if (!member) return interaction.reply({ content: "User is not in this server.", ephemeral: true });
-
-    addLog(user.id, "Permanent Ban", interaction.user.tag, reason);
-    await member.ban({ reason });
-
-    const embed = new EmbedBuilder()
-      .setTitle(`${user.tag} | Ban`)
-      .setDescription(`Banned by ${interaction.user.tag}\nReason: ${reason}`)
-      .setColor(0xff0000)
-      .setTimestamp();
-
-    interaction.guild.channels.cache.get(BAN_LOG_CHANNEL)?.send({ embeds: [embed] });
-    await interaction.reply({ content: `${user.tag} banned.` });
-    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
-  }
-
-  // TEMP BAN
-  if (interaction.commandName === "tban") {
-    if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const user = interaction.options.getUser("user");
-    const hours = interaction.options.getInteger("hours");
-    const reason = interaction.options.getString("reason");
-    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-    if (!member) return interaction.reply({ content: "User not found.", ephemeral: true });
-
-    await member.ban({ reason: `${reason} (${hours}h)` });
-    addLog(user.id, "Temp Ban", interaction.user.tag, reason);
-    setTimeout(() => interaction.guild.members.unban(user.id).catch(() => {}), hours * 60 * 60 * 1000);
-    await interaction.reply({ content: `${user.tag} banned for ${hours} hours.` });
-    setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
-  }
-
-  // MY LEVEL
-  if (interaction.commandName === "mylevel") {
-    const data = levelData[interaction.user.id];
-    if (!data) return interaction.reply({ content: "You have no XP yet.", ephemeral: true });
-    return interaction.reply({ content: `Level: ${data.level}\nXP: ${data.xp}/${data.level * 100}`, ephemeral: true });
-  }
-
-  // XP LEADERBOARD
-  if (interaction.commandName === "leaderboard") {
-    const sorted = Object.entries(levelData).sort((a, b) => b[1].level - a[1].level).slice(0, 10);
-    if (sorted.length === 0) return interaction.reply("No data yet.");
-    const leaderboard = sorted.map((u, i) => {
-      const m = interaction.guild.members.cache.get(u[0]);
-      return `${i + 1}. ${m ? m.user.tag : "Unknown"} — Level ${u[1].level}`;
-    }).join("\n");
-    return interaction.reply({ content: `🏆 **XP Leaderboard**\n\n${leaderboard}` });
-  }
-
-  // RECRUIT LEADERBOARD
-  if (interaction.commandName === "recruitleaderboard") {
-    const sorted = Object.entries(inviteData).sort((a, b) => b[1].invites - a[1].invites).slice(0, 10);
-    if (sorted.length === 0) return interaction.reply("No recruitment data yet.");
-    const leaderboard = sorted.map((u, i) => {
-      const m = interaction.guild.members.cache.get(u[0]);
-      return `${i + 1}. ${m ? m.user.tag : "Unknown"} — ${u[1].invites} invites`;
-    }).join("\n");
-    return interaction.reply({ content: `📈 **Recruitment Leaderboard**\n\n${leaderboard}` });
-  }
-
-  // MY INVITES
-  if (interaction.commandName === "myinvites") {
-    const data = inviteData[interaction.user.id];
-    if (!data) return interaction.reply({ content: "You have 0 invites.", ephemeral: true });
-    return interaction.reply({ content: `📊 You have invited ${data.invites} member(s).`, ephemeral: true });
-  }
-
-  // CLAIM
-  if (interaction.commandName === "claim") {
-    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-      return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
-
-    const embed = new EmbedBuilder()
-      .setTitle("Ticket Claimed")
-      .setDescription(`${interaction.user} has claimed this ticket.`)
-      .setColor("#2A5CFF")
-      .setTimestamp();
-    await interaction.reply({ embeds: [embed] });
-  }
-
-  // CLOSE
-  if (interaction.commandName === "close") {
-    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-      return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
-
-    const reason = interaction.options.getString("reason");
-    const channel = interaction.channel;
-    const channelName = channel.name;
-    const fetched = await channel.messages.fetch({ limit: 100 });
-    const transcript = fetched.reverse().map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`).join("\n");
-
-    let ticketType = "Ticket";
-    if (channelName.includes("general")) ticketType = "General Support";
-    else if (channelName.includes("ia")) ticketType = "Internal Affairs";
-    else if (channelName.includes("mgmt")) ticketType = "Management Support";
-
-    const opener = fetched.last()?.author ?? interaction.user;
-    const transcriptEmbed = new EmbedBuilder()
-      .setTitle(`${ticketType} - ${opener.tag}`)
-      .setDescription(`**Closed by:** ${interaction.user}\n**Reason:** ${reason}\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``)
-      .setColor("#2A5CFF")
-      .setTimestamp();
-
-    const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
-    if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
-    await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
-    setTimeout(() => channel.delete().catch(() => {}), 2000);
-  }
-
-  // CLOSEREQ
-  if (interaction.commandName === "closereq") {
-    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-      return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
-
-    const embed = new EmbedBuilder()
-      .setTitle("Close Request")
-      .setDescription("The ticket support would like to know whether or not you want to close the ticket.")
-      .setColor("#2A5CFF")
-      .setTimestamp();
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`closereq_yes_${interaction.user.id}`).setLabel("Yes").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`closereq_no_${interaction.user.id}`).setLabel("No").setStyle(ButtonStyle.Danger)
-    );
-    await interaction.reply({ embeds: [embed], components: [row] });
-  }
-});
-
-// ===== REGISTER SLASH COMMANDS =====
-const rest = new REST({ version: "10" }).setToken(TOKEN);
-(async () => {
-  try {
-    console.log("🔄 Refreshing application (/) commands...");
-    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands.map(cmd => cmd.toJSON()) });
-    console.log("✅ Slash commands registered.");
-  } catch (error) {
-    console.error(error);
-  }
-})();
-
-// ===== BUTTON & SELECT MENU INTERACTIONS =====
-client.on("interactionCreate", async interaction => {
+  // ===== BUTTONS & SELECT MENUS =====
   if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
 
   // ===== APPLICATION APPROVE/DENY =====
@@ -1110,7 +1118,7 @@ client.on("interactionCreate", async interaction => {
     }
   }
 
-  // ===== CLAIM TICKET =====
+  // ===== CLAIM TICKET (button) =====
   if (interaction.customId === "claim_ticket") {
     if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
       return interaction.reply({ content: "❌ Only ticket staff can claim tickets.", ephemeral: true });
@@ -1131,7 +1139,7 @@ client.on("interactionCreate", async interaction => {
     await interaction.deferUpdate();
   }
 
-  // ===== OPEN TICKET =====
+  // ===== OPEN TICKET (select menu) =====
   if (
     (interaction.isStringSelectMenu() && interaction.customId === "ticket_select") ||
     interaction.customId === "general_ticket" ||
@@ -1180,7 +1188,7 @@ client.on("interactionCreate", async interaction => {
     interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
   }
 
-  // ===== CLOSE TICKET =====
+  // ===== CLOSE TICKET (button) =====
   if (interaction.customId === "close_ticket") {
     if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
       return interaction.reply({ content: "❌ Only ticket staff can close tickets.", ephemeral: true });
@@ -1224,6 +1232,18 @@ client.on("interactionCreate", async interaction => {
     }
   }
 });
+
+// ===== REGISTER SLASH COMMANDS =====
+const rest = new REST({ version: "10" }).setToken(TOKEN);
+(async () => {
+  try {
+    console.log("🔄 Refreshing application (/) commands...");
+    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands.map(cmd => cmd.toJSON()) });
+    console.log("✅ Slash commands registered.");
+  } catch (error) {
+    console.error(error);
+  }
+})();
 
 // ===== ANTI NUKE EVENTS =====
 client.on("channelDelete", async channel => {
