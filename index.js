@@ -1385,49 +1385,41 @@ if (interaction.isButton() && interaction.customId.startsWith("bot_")) {
   }
 }
 
+// === CLAIM TICKET === //
 if (interaction.customId === "claim_ticket") {
 
-
-
-  // Only allow staff to claim
-  if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
+  if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE)) {
     return interaction.reply({ content: "❌ Only ticket staff can claim tickets.", ephemeral: true });
+  }
 
-  // Embed for claimed ticket
   const claimEmbed = new EmbedBuilder()
     .setTitle("**Ticket Claimed**")
     .setDescription(`Your ticket has been claimed by ${interaction.user.tag}`)
     .setColor("#2b2d31")
     .setTimestamp();
 
-  // Disable the Claim button, keep Close active
-  const row = new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("Close")
-        .setStyle(ButtonStyle.Danger),
-      new ButtonBuilder()
-        .setCustomId("claim_ticket")
-        .setLabel("Claimed")
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(true)
-    );
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("close_ticket")
+      .setLabel("Close")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId("claim_ticket")
+      .setLabel("Claimed")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(true)
+  );
 
-  // Edit the original ticket message
-await interaction.message.edit({ embeds: [claimEmbed], components: [row] });
+  await interaction.message.edit({ embeds: [claimEmbed], components: [row] });
 
-// CHANGE CHANNEL NAME TO GREEN
-const oldName = interaction.channel.name;
+  const oldName = interaction.channel.name;
+  let newName = oldName.replace("🔴-", "");
+  newName = `🟢-${newName}`;
 
-let newName = oldName.replace("🔴-", "");
-newName = `🟢-${newName}`;
+  await interaction.channel.setName(newName).catch(() => {});
 
-interaction.channel.setName(newName).catch(() => {});
-
-// ✅ Acknowledge the interaction to avoid "failed"
-await interaction.deferUpdate();
-}
+  await interaction.deferUpdate();
+} // ✅ closes claim_ticket
   
 /* OPEN TICKET */
 
