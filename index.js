@@ -240,6 +240,8 @@ if (!existing) {
   });
 }
 
+}); 
+
 // ===== ANTI RAID + AUTO ROLES =====
 let recentJoins = [];
 let antiNukeTracker = new Map();
@@ -1598,6 +1600,7 @@ client.on("roleDelete", async role => {
   if (!executorId) return;
 
   trackNukeAction(guild, executorId, "Role Deletion");
+  
 });
 
 client.login(TOKEN);
