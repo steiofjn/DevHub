@@ -1548,25 +1548,6 @@ if (interaction.customId === "close_ticket") {
 
   const channel = interaction.channel;
 
-  // Find the ticket owner (member overwrite that is NOT the support role)
-  const userOverwrite = channel.permissionOverwrites.cache.find(
-    o => o.type === 1 && o.id !== TICKET_SUPPORT_ROLE
-  );
-
-  const userId = userOverwrite?.id;
-
-  try {
-    if (userId) {
-      const user = await client.users.fetch(userId);
-
-      await user.send(
-        "Your ticket was closed by Ticket Support. If you still need help, please open another ticket."
-      ).catch(() => {});
-    }
-  } catch (err) {
-    console.log("Failed to DM user:", err);
-  }
-
   await interaction.reply({
     content: "🗑️ Closing ticket...",
     ephemeral: true
