@@ -1007,9 +1007,9 @@ if (interaction.commandName === "strike") {
     .setTitle("<:dh:1487558730642882861> Strike")
     .setDescription(`${user} has been issued a strike by ${interaction.user}. Please do not continue to do so or else you will face other consequences.`)
     .addFields(
-      { > name: "User", value: `${user}`, inline: false },
-      { > name: "Punishment", value: `Strike ${strikes}`, inline: false },
-      { > name: "Reason", value: `${reason}`, inline: false }
+      { name: "> User", value: `${user}`, inline: false },
+      { name: "> Punishment", value: `Strike ${strikes}`, inline: false },
+      { name: "> Reason", value: `${reason}`, inline: false }
     )
     .setColor("#2b2d31")
     .setThumbnail(user.displayAvatarURL())
