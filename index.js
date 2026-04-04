@@ -1082,6 +1082,7 @@ client.on('interactionCreate', async interaction => {
       const member = await interaction.guild.members.fetch(userId).catch(() => null);
       if (member) {
         await member.roles.add(DESIGNER_ROLE_ID).catch(() => {});
+        await member.roles.add("1489098884700700793").catch(() => {});
         await targetUser?.send(
           "Congratulations on passing the Designer Application! Welcome to our team and we can't wait for you to start. You can view all information in the staff channel and if you have any questions ask a Senior Designer or the Lead Designer."
         ).catch(() => {});
