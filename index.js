@@ -1,1314 +1,1416 @@
-const { 
-  Client, 
-  GatewayIntentBits, 
-  SlashCommandBuilder, 
-  REST, 
-  Routes,
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  StringSelectMenuBuilder,
-  PermissionsBitField,
-  ChannelType,
-  Partials  // ✅ FIX 1: Import Partials enum
-} = require('discord.js');
-
-const fs = require("fs");
-
-// ===== CONFIG =====
-const TOKEN = process.env.TOKEN;
-const CLIENT_ID = "1489071517294792764";
-const GUILD_ID = "1482878524841922630";
-
-// ===== VERIFY SYSTEM =====
-const UNVERIFIED_ROLE = "1487554862492156014";
-const VERIFIED_ROLES = [
-  "1487552823683059762",
-  "1489285453185159208"
-];
-const VERIFY_CHANNEL_ID = "1487555154575360120";
-
-// ===== CHANNELS =====
-const FULL_LOG_CHANNEL_ID = "1487555326713528494";
-const BAN_LOG_CHANNEL = "1487555326713528494";
-const INVITE_LOG_CHANNEL = "1487555326713528494";
-const APPLICATION_LOG_CHANNEL = "1489705795594490068";
-const MIN_ACCOUNT_AGE_DAYS = 7;
-
-// ===== ROLES =====
-const MOD_ROLE_ID = [
-  "1487552685673812028",
-  "1487552709606248488",
-  "1487552730963902707",
-  "1482913822955274340"
-];
-const DESIGNER_ROLE_ID = "1489098027477106960";
-
-// ===== TICKET SYSTEM =====
-const TICKET_PANEL_CHANNEL = "1487555705400463491";
-const TICKET_CATEGORY = "1487555806202171533";
-const TICKET_SUPPORT_ROLE = "1487555904390828052";
-
-// ===== RAID PREVENTION =====
-const RAID_JOIN_THRESHOLD = 5;
-const RAID_TIME_WINDOW = 10000;
-const AUTO_LOCKDOWN = true;
-
-// ===== ANTI NUKE =====
-const NUKER_THRESHOLD = 3;
-const NUKER_TIME_WINDOW = 10000;
-const AUTO_BAN_NUKERS = true;
-const AUTO_LOCKDOWN_ON_NUKE = true;
-
-// ===== AUTOMOD CONFIG =====
-const MASS_MENTION_LIMIT = 5;
-const EMOJI_SPAM_LIMIT = 10;
-const WHITELISTED_LINKS = ["discord.com", "tenor.com", "imgur.com"];
-const NEW_MEMBER_DAYS = 7;
-
-// ===== DATABASES =====
-const LOG_DB = "./playerlogs.json";
-const STRIKE_DB = "./strikes.json";
-const LEVEL_DB = "./levels.json";
-const INVITE_DB = "./invites.json";
-
-let strikeData = fs.existsSync(STRIKE_DB) ? JSON.parse(fs.readFileSync(STRIKE_DB)) : {};
-let levelData = fs.existsSync(LEVEL_DB) ? JSON.parse(fs.readFileSync(LEVEL_DB)) : {};
-let inviteData = fs.existsSync(INVITE_DB) ? JSON.parse(fs.readFileSync(INVITE_DB)) : {};
-let playerLogs = fs.existsSync(LOG_DB) ? JSON.parse(fs.readFileSync(LOG_DB)) : {};
-
-function saveStrikes() { fs.writeFileSync(STRIKE_DB, JSON.stringify(strikeData, null, 2)); }
-function saveLevels() { fs.writeFileSync(LEVEL_DB, JSON.stringify(levelData, null, 2)); }
-function saveInvites() { fs.writeFileSync(INVITE_DB, JSON.stringify(inviteData, null, 2)); }
-function saveLogs() { fs.writeFileSync(LOG_DB, JSON.stringify(playerLogs, null, 2)); }
-
-function addLog(userId, type, moderator, reason) {
-  if (!playerLogs[userId]) playerLogs[userId] = [];
-  playerLogs[userId].push({ type, moderator, reason, date: new Date().toLocaleString() });
-  saveLogs();
-}
-
-// ===== APPLICATION SESSION TRACKING =====
-// state: "instructions" | "awaiting_answers" | "awaiting_images"
-const applicationSessions = new Map();
-
-// ===== CLIENT =====
-// ✅ FIX 2: Use proper Partials enum values — string-based partials silently fail in discord.js v14
-//            and DMs will never be received without Partials.Channel
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildModeration,
-    GatewayIntentBits.GuildInvites  // ✅ FIX 3: Required for invite tracking/caching to work reliably
-  ],
-  partials: [Partials.Channel, Partials.Message]  // ✅ FIX: was ["CHANNEL", "MESSAGE"] which does nothing in v14
-});
-
-// ===== INVITE CACHE =====
-let inviteCache = new Map();
-
-client.once("ready", async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-
-  const guild = client.guilds.cache.get(GUILD_ID);
-  if (!guild) return;
-
-  const invites = await guild.invites.fetch();
-  inviteCache.set(guild.id, invites);
-
-  const panelChannel = await guild.channels.fetch(TICKET_PANEL_CHANNEL);
-  if (!panelChannel) return;
-
-  const headerEmbed = new EmbedBuilder()
-    .setColor("#2A5CFF")
-    .setImage("https://cdn.discordapp.com/attachments/1489096700793716817/1489307015787577495/New_Project_6.png");
-
-  const ticketEmbed = new EmbedBuilder()
-    .setColor("#2A5CFF")
-    .setTitle("<:info2:1488904572498870533> Support Information")
-    .setDescription(
-      "> Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
-      "<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
-      "<:chat:1488905927896596582> **General Support**\n" +
-      "> <:CF11:1488888964755492944> General Inquires\n" +
-      "> <:CF11:1488888964755492944> General Concerns\n" +
-      "> <:CF11:1488888964755492944> Member Reports\n\n" +
-      "<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
-      "<:IA:1488906883648458863> **IA Support**\n" +
-      "> <:CF11:1488888964755492944> Staff Reports\n" +
-      "> <:CF11:1488888964755492944> Scam Reports\n" +
-      "> <:CF11:1488888964755492944> LOA Requests\n" +
-      "> <:CF11:1488888964755492944> Refund Requests\n\n" +
-      "<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
-      "<:mgmt:1488907498332356820> **Management Support**\n" +
-      "> <:CF11:1488888964755492944> High Rank Inquires\n" +
-      "> <:CF11:1488888964755492944> Partnership Requests\n" +
-      "> <:CF11:1488888964755492944> Role Requests\n\n" +
-      "<:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730><:D3:1488887648927088730>\n" +
-      "**⚠️ Important**\n" +
-      "> <:CF11:1488888964755492944> Do not spam tickets\n" +
-      "> <:CF11:1488888964755492944> Provide detailed information\n" +
-      "> <:CF11:1488888964755492944> Be patient while waiting\n\n"
-    )
-    .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1488908758263402556/image.png")
-    .setFooter({ text: "Developer Hub • Support System" });
-
-  const row = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("ticket_select")
-      .setPlaceholder("Select a ticket type...")
-      .addOptions([
-        { label: "General Support", description: "Questions, help, or general issues", value: "general_ticket", emoji: { id: "1488905927896596582" } },
-        { label: "Internal Affairs", description: "Report staff or serious concerns", value: "ia_ticket", emoji: { id: "1480281879516283071" } },
-        { label: "Management", description: "Contact high command", value: "mgmt_ticket", emoji: { id: "1480283687223427313" } }
-      ])
-  );
-
-  const messages = await panelChannel.messages.fetch({ limit: 10 });
-  const existing = messages.find(m => m.author.id === client.user.id);
-  if (!existing) {
-    await panelChannel.send({ embeds: [headerEmbed, ticketEmbed], components: [row] });
-  }
-});
-
-// ===== ANTI RAID + AUTO ROLES =====
-let recentJoins = [];
-let antiNukeTracker = new Map();
-let raidMode = false;
-
-client.on("guildMemberAdd", async member => {
-
-  // Join gating: instantly kick if raid mode is active
-  if (raidMode) {
-    await member.kick("Server is in raid lockdown.").catch(() => {});
-    await member.send("The server is currently under a raid lockdown. Please try joining again later.").catch(() => {});
-    return;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DiscoDev Scripting Services</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --dark1: #020c1b;
+    --dark2: #0a1f3d;
+    --dark3: #0d2b54;
+    --mid:   #1a4a7a;
+    --light1:#2176ae;
+    --light2:#3fa0dc;
+    --light3:#7dd3f7;
+    --accent:#00d4ff;
+    --glow:  #00aaff;
+    --text:  #d6f0ff;
+    --white: #ffffff;
   }
 
-  recentJoins.push(Date.now());
-  recentJoins = recentJoins.filter(t => Date.now() - t < RAID_TIME_WINDOW);
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
-  if (recentJoins.length >= RAID_JOIN_THRESHOLD && !raidMode) {
-    raidMode = true;
+  html { scroll-behavior: smooth; }
 
-    const logChannel = member.guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
-    logChannel?.send("🚨 **RAID DETECTED — LOCKDOWN INITIATED**");
-
-    const invites = await member.guild.invites.fetch();
-    for (const inv of invites.values()) await inv.delete().catch(() => {});
-
-    if (AUTO_LOCKDOWN) {
-      member.guild.channels.cache.forEach(channel => {
-        if (channel.type === ChannelType.GuildText) {
-          channel.permissionOverwrites.edit(member.guild.roles.everyone, { SendMessages: false }).catch(() => {});
-          channel.permissionOverwrites.edit(UNVERIFIED_ROLE, { ViewChannel: false }).catch(() => {});
-        }
-      });
-    }
-
-    // Ban all members who joined within the raid window
-    const recentMembers = member.guild.members.cache
-      .filter(m => Date.now() - m.joinedTimestamp < RAID_TIME_WINDOW)
-      .values();
-    for (const raider of recentMembers) {
-      await raider.ban({ reason: "Raid detection - auto ban" }).catch(() => {});
-    }
-
-    setTimeout(() => {
-      raidMode = false;
-      member.guild.channels.cache.forEach(channel => {
-        if (channel.type === ChannelType.GuildText) {
-          channel.permissionOverwrites.edit(member.guild.roles.everyone, { SendMessages: true }).catch(() => {});
-          channel.permissionOverwrites.edit(UNVERIFIED_ROLE, { ViewChannel: null }).catch(() => {});
-        }
-      });
-      logChannel?.send("✅ Raid mode disabled. Server unlocked.");
-    }, 10 * 60 * 1000);
+  body {
+    font-family: 'Exo 2', sans-serif;
+    background: var(--dark1);
+    color: var(--text);
+    cursor: none;
+    overflow-x: hidden;
+    min-height: 100vh;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
   }
 
-  // Alt account check BEFORE giving role
-  const accountAge = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
-  if (accountAge < MIN_ACCOUNT_AGE_DAYS) {
-    await member.kick("Alt account detected (too new)").catch(() => {});
-    member.guild.channels.cache.get(FULL_LOG_CHANNEL_ID)
-      ?.send(`🚫 Kicked alt account: ${member.user.tag} (${accountAge.toFixed(1)} days old)`);
-    return;
+  /* ===== CUSTOM CURSOR ===== */
+  #cursor {
+    position: fixed;
+    width: 28px; height: 28px;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    background: transparent;
+    pointer-events: none;
+    z-index: 99999;
+    transform: translate(-50%, -50%);
+    transition: transform 0.08s ease;
+    box-shadow: 0 0 8px rgba(0,212,255,0.5);
+  }
+  #cursor.clicking { transform: translate(-50%, -50%) scale(0.7); }
+
+  .spark {
+    position: fixed;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 99998;
+    animation: sparkFly 0.55s ease-out forwards;
+  }
+  @keyframes sparkFly {
+    0%   { opacity: 1; transform: translate(0,0) scale(1); }
+    100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0); }
   }
 
-  await member.roles.add(UNVERIFIED_ROLE).catch(err => console.error("Failed to add unverified role:", err));
-
-  // Bot join approval
-  if (member.user.bot) {
-    const logChannel = member.guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
-    const embed = new EmbedBuilder()
-      .setTitle("🤖 Bot Joined")
-      .setDescription(`Bot: ${member}\nTag: ${member.user.tag}\n\nApprove or deny this bot.`)
-      .setColor("#ff9900")
-      .setTimestamp();
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`bot_deny_${member.id}`).setLabel("Deny").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(`bot_confirm_${member.id}`).setLabel("Confirm").setStyle(ButtonStyle.Success)
-    );
-    logChannel?.send({ embeds: [embed], components: [row] });
-    return;
+  /* ===== HEX CANVAS BACKGROUND ===== */
+  #hexCanvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    pointer-events: none;
   }
 
-  // Invite tracking
-  const newInvites = await member.guild.invites.fetch();
-  const oldInvites = inviteCache.get(member.guild.id);
-  const usedInvite = newInvites.find(inv => oldInvites?.get(inv.code)?.uses < inv.uses);
-
-  if (usedInvite && usedInvite.inviter) {
-    const inviter = usedInvite.inviter;
-    const inviterId = inviter.id;
-    if (accountAge >= MIN_ACCOUNT_AGE_DAYS) {
-      if (!inviteData[inviterId]) inviteData[inviterId] = { invites: 0, users: [] };
-      inviteData[inviterId].invites += 1;
-      inviteData[inviterId].users.push(member.id);
-      saveInvites();
-      member.guild.channels.cache.get(INVITE_LOG_CHANNEL)?.send(`📈 ${inviter.tag} invited ${member.user.tag}`);
-    } else {
-      member.guild.channels.cache.get(INVITE_LOG_CHANNEL)?.send(`⚠️ Invite from ${inviter.tag} ignored (new account under ${MIN_ACCOUNT_AGE_DAYS} days).`);
-    }
+  /* ===== NAV ===== */
+  nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 48px;
+    height: 70px;
+    background: rgba(2,12,27,0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(0,212,255,0.15);
   }
 
-  const welcomeChannel = member.guild.channels.cache.get("1482878525286650048");
-  if (welcomeChannel) welcomeChannel.send(`Welcome ${member} to DevHub! We now have ${member.guild.memberCount} members.`);
-
-  inviteCache.set(member.guild.id, newInvites);
-});
-
-// ===== REMOVE INVITE IF USER LEAVES =====
-client.on("guildMemberRemove", async member => {
-  // Invite tracking cleanup
-  for (const inviterId in inviteData) {
-    const data = inviteData[inviterId];
-    if (data.users && data.users.includes(member.id)) {
-      data.users = data.users.filter(id => id !== member.id);
-      data.invites = Math.max(0, data.invites - 1);
-      saveInvites();
-      member.guild.channels.cache.get(INVITE_LOG_CHANNEL)?.send(`📉 Invite removed from <@${inviterId}> (user left)`);
-      break;
-    }
+  .nav-logo {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 1.3rem;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,212,255,0.6);
+    letter-spacing: 2px;
   }
 
-  // Anti-nuke kick tracking
-  const guild = member.guild;
-  const logs = await guild.fetchAuditLogs({ type: 20, limit: 1 }).catch(() => null);
-  if (!logs) return;
-  const entry = logs.entries.first();
-  if (!entry || entry.target?.id !== member.id) return;
-  const executorId = entry.executor?.id;
-  if (!executorId) return;
-  trackNukeAction(guild, executorId, "Mass Kick Activity");
-});
-
-// ===== AUTOMOD LOG EMBED =====
-function sendAutomodLog(guild, user, channel, rule, action) {
-  const logChannel = guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
-  if (!logChannel) return;
-  const embed = new EmbedBuilder()
-    .setTitle("🤖 Automod Action")
-    .setColor("#ff4444")
-    .setThumbnail(user.displayAvatarURL())
-    .addFields(
-      { name: "User", value: `${user.tag} (${user.id})`, inline: true },
-      { name: "Channel", value: `<#${channel.id}>`, inline: true },
-      { name: "Rule Broken", value: rule, inline: false },
-      { name: "Action Taken", value: action, inline: false }
-    )
-    .setTimestamp();
-  logChannel.send({ embeds: [embed] });
-}
-
-// ===== AUTOMOD =====
-function normalizeWord(word) {
-  return word.toLowerCase().replace(/(.)\1+/g, "$1");
-}
-
-const bannedWords = ["nigger", "faggot", "fuck", "bitch", "cunt", "retard", "whore", "slut"];
-const zalgoRegex = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]{3,}/;
-
-const messageTracker = new Map();
-const SPAM_LIMIT = 5;
-const SPAM_TIME = 3000;
-
-// ===== MESSAGE CREATE — GUILD (Automod + Levels) =====
-client.on("messageCreate", async message => {
-  if (!message.guild || message.author.bot) return;
-
-  const member = message.member;
-  const isNewMember = member && (Date.now() - member.joinedTimestamp) / (1000 * 60 * 60 * 24) < NEW_MEMBER_DAYS;
-  const userId = message.author.id;
-
-  // ===== SPAM CHECK =====
-  if (!messageTracker.has(userId)) messageTracker.set(userId, []);
-  const timestamps = messageTracker.get(userId);
-  timestamps.push(Date.now());
-  const filtered = timestamps.filter(t => Date.now() - t < SPAM_TIME);
-  messageTracker.set(userId, filtered);
-
-  const spamLimit = isNewMember ? 3 : SPAM_LIMIT;
-  if (filtered.length >= spamLimit) {
-    await message.member.timeout(10 * 60 * 1000).catch(() => {});
-    await message.channel.send(`🚫 ${message.author} muted for spamming.`);
-    messageTracker.delete(userId);
-    sendAutomodLog(message.guild, message.author, message.channel, "Spam", "10 Minute Timeout");
-    return;
+  .nav-links {
+    display: flex;
+    gap: 8px;
+    list-style: none;
   }
 
-  // ===== DISCORD INVITE DETECTION =====
-  const inviteRegex = /(discord\.gg|discord\.com\/invite)\/[a-zA-Z0-9]+/gi;
-  if (inviteRegex.test(message.content)) {
-    await message.delete().catch(() => {});
-    await message.member.timeout(5 * 60 * 1000).catch(() => {});
-    await message.author.send("Do not advertise other Discord servers.").catch(() => {});
-    addLog(message.member.id, "Invite Advertisement", "Automod", "5 Minute Timeout");
-    sendAutomodLog(message.guild, message.author, message.channel, "Discord Invite Advertisement", "5 Minute Timeout + Message Deleted");
-    return;
+  .nav-links a {
+    font-family: 'Exo 2', sans-serif;
+    font-weight: 600;
+    font-size: 0.85rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--light3);
+    text-decoration: none;
+    padding: 8px 20px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    transition: all 0.25s ease;
+    position: relative;
+  }
+  .nav-links a:hover, .nav-links a.active {
+    color: var(--accent);
+    border-color: rgba(0,212,255,0.35);
+    background: rgba(0,212,255,0.07);
+    text-shadow: 0 0 12px rgba(0,212,255,0.5);
   }
 
-  // ===== LINK FILTER =====
-  const urlRegex = /https?:\/\/[^\s]+/gi;
-  const links = message.content.match(urlRegex);
-  if (links) {
-    const isAllowed = links.every(link => WHITELISTED_LINKS.some(domain => link.includes(domain)));
-    if (!isAllowed || isNewMember) {
-      await message.delete().catch(() => {});
-      await message.channel.send(`${message.author} Links are not permitted here.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-      sendAutomodLog(message.guild, message.author, message.channel, "Unauthorised Link", "Message Deleted");
-      return;
-    }
+  /* ===== PAGE WRAPPER ===== */
+  .page {
+    display: none;
+    position: relative;
+    z-index: 1;
+    padding-top: 70px;
+    min-height: 100vh;
+    animation: fadeIn 0.45s ease;
+  }
+  .page.active { display: block; }
+  @keyframes fadeIn {
+    from { opacity:0; transform:translateY(18px); }
+    to   { opacity:1; transform:translateY(0); }
   }
 
-  // ===== MASS MENTION DETECTION =====
-  const mentionCount = message.mentions.users.size + message.mentions.roles.size;
-  if (mentionCount > MASS_MENTION_LIMIT) {
-    await message.delete().catch(() => {});
-    await message.member.timeout(15 * 60 * 1000).catch(() => {});
-    await message.author.send("You have been timed out for mass mentioning.").catch(() => {});
-    addLog(message.member.id, "Mass Mention", "Automod", "15 Minute Timeout");
-    sendAutomodLog(message.guild, message.author, message.channel, `Mass Mention (${mentionCount})`, "15 Minute Timeout + Message Deleted");
-    return;
+  /* ===== HERO ===== */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 120px 40px 80px;
+    position: relative;
   }
 
-  // ===== EMOJI SPAM =====
-  const emojiRegex = /(\p{Emoji_Presentation}|\p{Extended_Pictographic}|<a?:\w+:\d+>)/gu;
-  const emojiMatches = message.content.match(emojiRegex) || [];
-  if (emojiMatches.length > EMOJI_SPAM_LIMIT) {
-    await message.delete().catch(() => {});
-    await message.channel.send(`${message.author} Please don't spam emojis.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-    sendAutomodLog(message.guild, message.author, message.channel, `Emoji Spam (${emojiMatches.length})`, "Message Deleted");
-    return;
+  .hero-eyebrow {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 5px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    opacity: 0.85;
   }
 
-  // ===== ZALGO / UNICODE ABUSE =====
-  if (zalgoRegex.test(message.content)) {
-    await message.delete().catch(() => {});
-    await message.channel.send(`${message.author} Zalgo or unicode abuse is not allowed.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-    sendAutomodLog(message.guild, message.author, message.channel, "Zalgo/Unicode Abuse", "Message Deleted");
-    return;
+  .hero h1 {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: clamp(2.5rem, 6vw, 5rem);
+    line-height: 1.05;
+    color: var(--white);
+    text-shadow: 0 0 40px rgba(0,180,255,0.35);
+    margin-bottom: 12px;
   }
 
-  // ===== REPEATED CHARACTER SPAM =====
-  if (/(.)\1{14,}/.test(message.content)) {
-    await message.delete().catch(() => {});
-    await message.channel.send(`${message.author} Please don't spam repeated characters.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-    sendAutomodLog(message.guild, message.author, message.channel, "Repeated Character Spam", "Message Deleted");
-    return;
+  .hero h1 span { color: var(--accent); }
+
+  .hero-sub {
+    font-family: 'Orbitron', monospace;
+    font-size: clamp(1rem, 2.5vw, 1.5rem);
+    color: var(--light3);
+    letter-spacing: 3px;
+    margin-bottom: 28px;
   }
 
-  // ===== CAPS SPAM =====
-  const capsPercent = (message.content.replace(/[^A-Z]/g, "").length / message.content.length) * 100;
-  if (message.content.length > 10 && capsPercent > 70) {
-    await message.delete().catch(() => {});
-    await message.channel.send(`${message.author} Please don't use excessive caps.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-    sendAutomodLog(message.guild, message.author, message.channel, "Excessive Caps", "Message Deleted");
-    return;
+  .hero-desc {
+    max-width: 680px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: rgba(214,240,255,0.8);
+    margin-bottom: 48px;
   }
 
-  // ===== BANNED WORDS =====
-  const words = message.content.split(/\s+/);
-  for (let rawWord of words) {
-    const clean = rawWord.replace(/[^a-zA-Z]/g, "");
-    const normalized = normalizeWord(clean);
-    if (bannedWords.includes(normalized)) {
-      await message.delete().catch(() => {});
-      await message.member.timeout(30 * 60 * 1000).catch(() => {});
-      addLog(message.member.id, "Prohibited Word", "Automod", "30 Minute Timeout");
-      sendAutomodLog(message.guild, message.author, message.channel, "Prohibited Word", "30 Minute Timeout + Message Deleted");
-      await message.author.send("You cannot use that language, you have been issued a warning.").catch(() => {});
-      return;
-    }
+  .cta-btn {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 16px 48px;
+    background: linear-gradient(135deg, var(--light1), var(--accent));
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    text-decoration: none;
+    display: inline-block;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    box-shadow: 0 0 30px rgba(0,212,255,0.3);
+    cursor: none;
+  }
+  .cta-btn:hover {
+    box-shadow: 0 0 55px rgba(0,212,255,0.7);
+    transform: translateY(-3px) scale(1.03);
+    background: linear-gradient(135deg, var(--accent), var(--light2));
+  }
+  .cta-btn:active {
+    transform: translateY(0) scale(0.97);
+    box-shadow: 0 0 20px rgba(0,212,255,0.4);
+  }
+  .btn-ripple {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.35);
+    transform: scale(0);
+    animation: btnRipple 0.5s linear;
+    pointer-events: none;
+  }
+  @keyframes btnRipple {
+    to { transform: scale(4); opacity: 0; }
   }
 
-  // ===== LEVEL SYSTEM =====
-  if (!levelData[message.author.id]) levelData[message.author.id] = { xp: 0, level: 1 };
-  const userLevel = levelData[message.author.id];
-  const MAX_LEVEL = 100;
-  if (userLevel.level < MAX_LEVEL) {
-    userLevel.xp += Math.floor(Math.random() * 10) + 5;
-    const requiredXP = userLevel.level * 100;
-    if (userLevel.xp >= requiredXP) {
-      userLevel.xp -= requiredXP;
-      userLevel.level += 1;
-      message.channel.send(`🎉 ${message.author} leveled up to Level ${userLevel.level}!`);
-    }
-    saveLevels();
-  }
-});
-
-// ===== MESSAGE CREATE — DMs (Application System) =====
-// ✅ FIX 4: Kept as a separate listener but now works because Partials.Channel is properly set.
-//            The DM listener is intentionally separate from guild messages — no issue with having both.
-client.on("messageCreate", async message => {
-  if (message.guild) return; // only DMs
-  if (message.author.bot) return;
-
-  const userId = message.author.id;
-  const session = applicationSessions.get(userId);
-  // ✅ FIX 5: Trim and lowercase for reliable matching — trailing spaces/newlines won't break it
-  const content = message.content.trim();
-  const contentLower = content.toLowerCase();
-
-  // Trigger: user says "apply"
-  if (!session && contentLower === "apply") {
-    applicationSessions.set(userId, { state: "instructions", answers: [] });
-
-    const instructionsEmbed = new EmbedBuilder()
-      .setTitle("Designer Application")
-      .setDescription(
-        "Thank you for applying to become a designer! Please follow these instructions so you can submit and finish the application.\n\n" +
-        "When you finish reading this please say **ready** to start the application.\n\n" +
-        "Once done those questions say **done** and then follow the instructions that you are given."
-      )
-      .setColor("#2A5CFF")
-      .setTimestamp();
-
-    await message.author.send({ embeds: [instructionsEmbed] }).catch(() => {});
-    return;
+  /* ===== SECTION CONTAINERS ===== */
+  .section {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 80px 40px;
   }
 
-  // User says "ready" — send questions
-  if (session && session.state === "instructions" && contentLower === "ready") {
-    session.state = "awaiting_answers";
-    session.answers = [];
-    applicationSessions.set(userId, session);
-
-    const questionsEmbed = new EmbedBuilder()
-      .setTitle("Designer Application")
-      .setDescription(
-        "Thank you for taking your time to apply for our designer application! Please answer the following questions in this personal message and they will be forwarded to our applications team. Without further ado lets begin.\n\n" +
-        "**Q1 -** What is your Roblox Username?\n" +
-        "**Q2 -** What do you focus on? (GFX, Clothing, etc)\n" +
-        "**Q3 -** How old are you?\n" +
-        "**Q4 -** What design tools do you use?\n" +
-        "**Q5 -** Do you have any previous experience designing for Roblox groups or communities? If yes, explain.\n" +
-        "**Q6 -** How would you handle a request from a client that you disagree with or find difficult?\n" +
-        "**Q7 -** How do you ensure your designs are high quality and meet requirements?\n" +
-        "**Q8 -** Are you able to meet deadlines and work under pressure? Explain your approach.\n" +
-        "**Q9 -** How do you handle feedback or criticism on your designs?\n" +
-        "**Q10 -** Is there anything else we should know about you or your design experience?\n\n" +
-        "***Once you are finished answering these questions please say **\"done\"** and we will continue with the application.***"
-      )
-      .setColor("#2A5CFF")
-      .setTimestamp();
-
-    await message.author.send({ embeds: [questionsEmbed] }).catch(() => {});
-    return;
+  .section-title {
+    font-family: 'Orbitron', monospace;
+    font-weight: 700;
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    color: var(--accent);
+    letter-spacing: 2px;
+    margin-bottom: 40px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(0,212,255,0.4), transparent);
   }
 
-  // Collecting answers
-  if (session && session.state === "awaiting_answers" && contentLower !== "done") {
-    session.answers.push(content);
-    applicationSessions.set(userId, session);
-    return;
+  /* ===== OFFER CARDS ===== */
+  .offer-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 24px;
+    margin-bottom: 60px;
   }
 
-  // User says "done" — prompt for images
-  if (session && session.state === "awaiting_answers" && contentLower === "done") {
-    session.state = "awaiting_images";
-    applicationSessions.set(userId, session);
+  .offer-card {
+    background: rgba(10,31,61,0.7);
+    border: 1px solid rgba(0,212,255,0.15);
+    border-radius: 12px;
+    padding: 32px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease;
+  }
+  .offer-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .offer-card:hover {
+    border-color: rgba(0,212,255,0.4);
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,100,200,0.2);
+  }
+  .offer-card:hover::before { opacity: 1; }
 
-    const almostThereEmbed = new EmbedBuilder()
-      .setTitle("Almost there!")
-      .setDescription("Please finish by providing images of your previous work.")
-      .setColor("#2A5CFF")
-      .setTimestamp();
-
-    await message.author.send({ embeds: [almostThereEmbed] }).catch(() => {});
-    return;
+  .offer-icon {
+    font-size: 2rem;
+    margin-bottom: 16px;
   }
 
-  // User sends images — finalise application
-  if (session && session.state === "awaiting_images") {
-    if (message.attachments.size === 0) {
-      await message.author.send("Please send at least one image to complete your application.").catch(() => {});
-      return;
-    }
-
-    await message.author.send(
-      "Thank you for providing those images — your application will now be forwarded to the applications team where they will review and discuss your application."
-    ).catch(() => {});
-
-    const appChannel = client.channels.cache.get(APPLICATION_LOG_CHANNEL);
-    if (appChannel) {
-      const answersText = session.answers.length > 0
-        ? session.answers.map((a, i) => `**Q${i + 1}:** ${a}`).join("\n")
-        : "No answers recorded.";
-
-      const appEmbed = new EmbedBuilder()
-        .setTitle(`Designer Application — ${message.author.tag}`)
-        .setDescription(answersText)
-        .setColor("#2A5CFF")
-        .setThumbnail(message.author.displayAvatarURL())
-        .setFooter({ text: `User ID: ${message.author.id}` })
-        .setTimestamp();
-
-      const approveRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`appv2_deny_${message.author.id}`)
-          .setLabel("Deny")
-          .setStyle(ButtonStyle.Danger),
-        new ButtonBuilder()
-          .setCustomId(`appv2_approve_${message.author.id}`)
-          .setLabel("Approve")
-          .setStyle(ButtonStyle.Success)
-      );
-
-      await appChannel.send({ embeds: [appEmbed], components: [approveRow] });
-
-      // Send images as a second message
-      const imageUrls = message.attachments.map(a => a.url).join("\n");
-      await appChannel.send(`**Designer Application — ${message.author.tag}**\n${imageUrls}`);
-    }
-
-    applicationSessions.delete(userId);
-    return;
+  .offer-card h3 {
+    font-family: 'Orbitron', monospace;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--light3);
+    letter-spacing: 1px;
+    margin-bottom: 16px;
   }
-});
 
-// ===== SLASH COMMANDS =====
-const commands = [
-  new SlashCommandBuilder().setName('verify').setDescription('Verify yourself'),
-  new SlashCommandBuilder().setName('promote').setDescription('Promote a user')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-    .addRoleOption(o => o.setName('role').setDescription('Role to give').setRequired(true))
-    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
-  new SlashCommandBuilder().setName('demote').setDescription('Demote a user')
-    .addUserOption(o => o.setName('user').setDescription('User to demote').setRequired(true))
-    .addRoleOption(o => o.setName('demoted_to').setDescription('Role they are being demoted to').setRequired(true))
-    .addRoleOption(o => o.setName('remove_role').setDescription('Role being removed').setRequired(true))
-    .addStringOption(o => o.setName('reason').setDescription('Reason for demotion').setRequired(true)),
-  new SlashCommandBuilder().setName('warn').setDescription('Warn a user')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
-  new SlashCommandBuilder().setName('logs').setDescription('View player logs')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)),
-  new SlashCommandBuilder().setName('clearlogs').setDescription('Clear player logs')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)),
-  new SlashCommandBuilder().setName('ban').setDescription('Permanently ban a user')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
-  new SlashCommandBuilder().setName('tban').setDescription('Temporarily ban a user')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-    .addIntegerOption(o => o.setName('hours').setDescription('Hours').setRequired(true))
-    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
-  new SlashCommandBuilder().setName('strike').setDescription('Strike a user')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
-  new SlashCommandBuilder().setName('clearstrikes').setDescription('Clear all strikes from a user')
-    .addUserOption(o => o.setName('user').setDescription('User to clear strikes for').setRequired(true)),
-  new SlashCommandBuilder().setName('strikes').setDescription('Check strikes')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)),
-  new SlashCommandBuilder().setName('mute').setDescription('Timeout a user')
-    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
-    .addIntegerOption(o => o.setName('minutes').setDescription('Minutes').setRequired(true)),
-  new SlashCommandBuilder().setName('slowmode').setDescription('Set slowmode in current channel')
-    .addIntegerOption(o => o.setName('seconds').setDescription('Seconds').setRequired(true)),
-  new SlashCommandBuilder().setName('recruitleaderboard').setDescription('Top recruiters'),
-  new SlashCommandBuilder().setName('myinvites').setDescription('Check how many users you have invited'),
-  new SlashCommandBuilder().setName('mylevel').setDescription('Check your level'),
-  new SlashCommandBuilder().setName('leaderboard').setDescription('XP leaderboard'),
-  new SlashCommandBuilder().setName('lockdown').setDescription('Lock the entire server'),
-  new SlashCommandBuilder().setName('unlockdown').setDescription('Unlock the server'),
-  new SlashCommandBuilder().setName('claim').setDescription('Claim a ticket'),
-  new SlashCommandBuilder().setName('close').setDescription('Close a ticket')
-    .addStringOption(o => o.setName('reason').setDescription('Reason for closing').setRequired(true)),
-  new SlashCommandBuilder().setName('closereq').setDescription('Ask the user if they want to close the ticket')
-];
-
-// ===== ANTI NUKE FUNCTIONS =====
-async function punishNuker(guild, userId, reason) {
-  if (userId === client.user.id) return;
-  if (userId === guild.ownerId) return;
-
-  try {
-    const member = await guild.members.fetch(userId).catch(() => null);
-    if (member && AUTO_BAN_NUKERS) await member.ban({ reason: `Anti-Nuke: ${reason}` }).catch(() => {});
-
-    const logChannel = guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
-    logChannel?.send(`🚨 Anti-Nuke triggered on <@${userId}> — ${reason}`);
-
-    if (AUTO_LOCKDOWN_ON_NUKE) {
-      guild.channels.cache.forEach(channel => {
-        if (channel.type === ChannelType.GuildText)
-          channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false }).catch(() => {});
-      });
-    }
-  } catch (err) {
-    console.log("Anti-nuke error:", err);
+  .offer-card ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
-}
+  .offer-card ul li {
+    font-size: 0.9rem;
+    color: rgba(214,240,255,0.75);
+    padding-left: 16px;
+    position: relative;
+  }
+  .offer-card ul li::before {
+    content: '›';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+  }
 
+  /* ===== TECH PILLS ===== */
+  .tech-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 60px;
+  }
+  .tech-pill {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.8rem;
+    letter-spacing: 1.5px;
+    padding: 10px 24px;
+    border: 1px solid rgba(0,212,255,0.35);
+    border-radius: 50px;
+    color: var(--accent);
+    background: rgba(0,212,255,0.06);
+    transition: all 0.25s ease;
+  }
+  .tech-pill:hover {
+    background: rgba(0,212,255,0.15);
+    box-shadow: 0 0 20px rgba(0,212,255,0.2);
+  }
+
+  /* ===== WHY CHOOSE ===== */
+  .why-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 20px;
+    margin-bottom: 60px;
+  }
+  .why-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 24px;
+    background: rgba(10,31,61,0.5);
+    border: 1px solid rgba(0,212,255,0.1);
+    border-radius: 10px;
+    transition: all 0.25s ease;
+  }
+  .why-item:hover {
+    border-color: rgba(0,212,255,0.3);
+    background: rgba(10,31,61,0.8);
+  }
+  .why-item span.check { font-size: 1.2rem; flex-shrink: 0; margin-top: 2px; }
+  .why-item p { font-size: 0.95rem; line-height: 1.5; color: rgba(214,240,255,0.85); }
+
+  /* ===== APPROACH ===== */
+  .approach-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+  .approach-item {
+    text-align: center;
+    padding: 28px 20px;
+    background: rgba(10,31,61,0.6);
+    border: 1px solid rgba(0,212,255,0.12);
+    border-radius: 10px;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.9rem;
+    color: var(--light3);
+    letter-spacing: 1px;
+    transition: all 0.25s ease;
+  }
+  .approach-item:hover {
+    background: rgba(0,212,255,0.08);
+    border-color: rgba(0,212,255,0.3);
+    color: var(--accent);
+  }
+
+  /* ===== CTA BANNER ===== */
+  .cta-banner {
+    text-align: center;
+    padding: 100px 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cta-banner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(0,150,255,0.1) 0%, transparent 70%);
+  }
+  .cta-banner h2 {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    color: var(--white);
+    text-shadow: 0 0 40px rgba(0,180,255,0.4);
+    margin-bottom: 20px;
+    position: relative;
+  }
+  .cta-banner p {
+    font-size: 1.05rem;
+    color: rgba(214,240,255,0.75);
+    max-width: 560px;
+    margin: 0 auto 40px;
+    line-height: 1.8;
+    position: relative;
+  }
+
+  /* ===== ABOUT PAGE ===== */
+  .about-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 48px;
+  }
+
+  .about-avatar {
+    position: static;
+    text-align: center;
+    width: 100%;
+  }
+  .avatar-ring {
+    width: 200px; height: 200px;
+    margin: 0 auto 24px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--dark3), var(--mid));
+    border: 3px solid rgba(0,212,255,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 5rem;
+    box-shadow: 0 0 50px rgba(0,100,200,0.3), inset 0 0 40px rgba(0,50,120,0.3);
+    animation: pulse-avatar 3s ease-in-out infinite;
+  }
+  @keyframes pulse-avatar {
+    0%,100% { box-shadow: 0 0 40px rgba(0,150,255,0.3), inset 0 0 30px rgba(0,50,120,0.2); }
+    50%      { box-shadow: 0 0 70px rgba(0,200,255,0.5), inset 0 0 50px rgba(0,100,200,0.3); }
+  }
+  .about-name {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+  .about-role {
+    font-size: 0.85rem;
+    color: rgba(214,240,255,0.6);
+    letter-spacing: 1px;
+  }
+
+  .about-content {
+    width: 100%;
+    max-width: 780px;
+    margin: 0 auto;
+  }
+
+  .about-content h2 {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 32px;
+    letter-spacing: 2px;
+  }
+  .about-content p {
+    font-size: 1rem;
+    line-height: 1.9;
+    color: rgba(214,240,255,0.82);
+    margin-bottom: 24px;
+  }
+
+  .stat-row {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+    justify-content: center;
+  }
+  .stat-box {
+    flex: 1;
+    min-width: 120px;
+    padding: 24px 20px;
+    background: rgba(10,31,61,0.6);
+    border: 1px solid rgba(0,212,255,0.2);
+    border-radius: 10px;
+    text-align: center;
+  }
+  .stat-box .num {
+    font-family: 'Orbitron', monospace;
+    font-size: 2rem;
+    font-weight: 900;
+    color: var(--accent);
+    display: block;
+  }
+  .stat-box .lbl {
+    font-size: 0.78rem;
+    letter-spacing: 1px;
+    color: rgba(214,240,255,0.55);
+    text-transform: uppercase;
+    margin-top: 6px;
+    display: block;
+  }
+
+  /* ===== PRICING PAGE ===== */
+  .pricing-intro {
+    text-align: center;
+    max-width: 720px;
+    margin: 0 auto 70px;
+    font-size: 1.05rem;
+    line-height: 1.85;
+    color: rgba(214,240,255,0.78);
+  }
+
+  .pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 28px;
+    margin-bottom: 60px;
+    align-items: start;
+  }
+
+  .price-card {
+    background: rgba(10,31,61,0.7);
+    border: 1px solid rgba(0,212,255,0.15);
+    border-radius: 16px;
+    padding: 40px 32px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.35s ease;
+  }
+  .price-card.featured {
+    border-color: rgba(0,212,255,0.5);
+    background: rgba(13,43,84,0.85);
+    box-shadow: 0 0 50px rgba(0,100,200,0.2);
+  }
+  .price-card.featured::after {
+    content: 'MOST POPULAR';
+    position: absolute;
+    top: 20px; right: -28px;
+    background: var(--accent);
+    color: #000;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 5px 40px;
+    transform: rotate(35deg);
+  }
+  .price-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 30px 80px rgba(0,100,200,0.25);
+    border-color: rgba(0,212,255,0.4);
+  }
+
+  .price-badge {
+    font-size: 1.5rem;
+    margin-bottom: 12px;
+  }
+  .price-card h3 {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--light3);
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+  .price-amount {
+    font-family: 'Orbitron', monospace;
+    font-size: 2.2rem;
+    font-weight: 900;
+    color: var(--accent);
+    margin-bottom: 24px;
+    display: block;
+  }
+  .price-amount span {
+    font-size: 1rem;
+    color: rgba(214,240,255,0.5);
+    font-weight: 400;
+  }
+  .price-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0,212,255,0.3), transparent);
+    margin-bottom: 24px;
+  }
+  .price-card ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .price-card ul li {
+    font-size: 0.9rem;
+    color: rgba(214,240,255,0.8);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .price-card ul li::before {
+    content: '✦';
+    color: var(--accent);
+    font-size: 0.65rem;
+    flex-shrink: 0;
+    margin-top: 3px;
+  }
+
+  .addons-card {
+    background: rgba(10,31,61,0.5);
+    border: 1px dashed rgba(0,212,255,0.25);
+    border-radius: 14px;
+    padding: 40px;
+    margin-bottom: 40px;
+  }
+  .addons-card h3 {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.2rem;
+    color: var(--accent);
+    margin-bottom: 28px;
+    letter-spacing: 2px;
+  }
+  .addons-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .addon-item {
+    padding: 16px 20px;
+    background: rgba(0,212,255,0.05);
+    border: 1px solid rgba(0,212,255,0.12);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: rgba(214,240,255,0.8);
+  }
+  .addon-item strong {
+    display: block;
+    color: var(--light3);
+    margin-bottom: 4px;
+    font-family: 'Exo 2', sans-serif;
+    font-weight: 600;
+  }
+  .addon-price {
+    color: var(--accent);
+    font-family: 'Orbitron', monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  .disclaimer {
+    text-align: center;
+    font-size: 0.8rem;
+    color: rgba(214,240,255,0.4);
+    border-top: 1px solid rgba(0,212,255,0.1);
+    padding-top: 24px;
+    font-style: italic;
+  }
+  .disclaimer strong { color: rgba(214,240,255,0.6); }
+
+  /* ===== GALLERY PAGE ===== */
+  .gallery-intro {
+    text-align: center;
+    max-width: 600px;
+    margin: 0 auto 60px;
+    font-size: 1rem;
+    line-height: 1.8;
+    color: rgba(214,240,255,0.7);
+  }
+
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 24px;
+    margin-bottom: 60px;
+  }
+  .gallery-card {
+    background: rgba(10,31,61,0.7);
+    border: 1px solid rgba(0,212,255,0.12);
+    border-radius: 14px;
+    overflow: hidden;
+    transition: all 0.35s ease;
+    cursor: none;
+  }
+  .gallery-card:hover {
+    border-color: rgba(0,212,255,0.4);
+    transform: translateY(-5px);
+    box-shadow: 0 24px 60px rgba(0,100,200,0.25);
+  }
+  .gallery-preview {
+    height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .gallery-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: top;
+    display: block;
+    transition: transform 0.4s ease;
+  }
+  .gallery-card:hover .gallery-preview img {
+    transform: scale(1.04);
+  }
+  .gallery-preview .code-preview {
+    font-family: 'Courier New', monospace;
+    font-size: 0.72rem;
+    color: rgba(0,212,255,0.7);
+    padding: 20px;
+    line-height: 1.6;
+    white-space: pre;
+    text-align: left;
+    width: 100%;
+  }
+  .gallery-preview::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 60px;
+    background: linear-gradient(transparent, rgba(10,31,61,0.95));
+  }
+  .gallery-info {
+    padding: 20px 24px 24px;
+  }
+  .gallery-tag {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 2px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    display: block;
+  }
+  .gallery-card h3 {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--light3);
+    margin-bottom: 8px;
+  }
+  .gallery-card p {
+    font-size: 0.85rem;
+    color: rgba(214,240,255,0.6);
+    line-height: 1.6;
+  }
+
+  /* ===== DIVIDER ===== */
+  .section-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0,212,255,0.2), transparent);
+    margin: 0 40px;
+  }
+
+  /* ===== FOOTER ===== */
+  footer {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 40px;
+    border-top: 1px solid rgba(0,212,255,0.1);
+    font-size: 0.82rem;
+    color: rgba(214,240,255,0.35);
+    letter-spacing: 1px;
+  }
+  footer span { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- HEX CANVAS -->
+<canvas id="hexCanvas"></canvas>
+
+<!-- CURSOR -->
+<div id="cursor"></div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">DISCODEV</div>
+  <ul class="nav-links">
+    <li><a href="#" class="active" onclick="showPage('home',this)">Home</a></li>
+    <li><a href="#" onclick="showPage('about',this)">About Me</a></li>
+    <li><a href="#" onclick="showPage('pricing',this)">Pricing</a></li>
+    <li><a href="#" onclick="showPage('gallery',this)">Gallery</a></li>
+  </ul>
+</nav>
+
+<!-- ===== HOME PAGE ===== -->
+<div id="page-home" class="page active">
+
+  <div class="hero">
+    <p class="hero-eyebrow">// Professional Scripting Services</p>
+    <h1><span>DiscoDev</span><br>Scripting Services</h1>
+    <p class="hero-sub">Build Smarter. Scale Faster.</p>
+    <p class="hero-desc">With over 11 years of experience, DiscoDev delivers powerful, reliable, and fully customized scripting solutions tailored to your needs. Whether you're launching a community, managing a large-scale server, or developing advanced systems, you'll get clean, efficient code that performs.</p>
+    <a href="#" class="cta-btn" onclick="showPage('pricing', document.querySelectorAll('.nav-links a')[2]); addRipple(event);">View Pricing</a>
+  </div>
+
+  <div class="section-divider"></div>
+
+  <div class="section">
+    <h2 class="section-title">What I Offer in My Discord Bots</h2>
+    <div class="offer-grid">
+      <div class="offer-card">
+        <div class="offer-icon">🤖</div>
+        <h3>Discord Bot Development</h3>
+        <ul>
+          <li>Moderation systems (automod, anti-raid, anti-nuke)</li>
+          <li>Ticket systems & support dashboards</li>
+          <li>Leveling, economy, and database systems</li>
+          <li>Slash commands & advanced interaction handling</li>
+          <li>Fully scalable and optimized code</li>
+        </ul>
+      </div>
+      <div class="offer-card">
+        <div class="offer-icon">🎮</div>
+        <h3>Lua Development</h3>
+        <ul>
+          <li>Roblox systems & backend logic</li>
+          <li>Custom gameplay features</li>
+          <li>UI systems and automation</li>
+        </ul>
+      </div>
+      <div class="offer-card">
+        <div class="offer-icon">⚙️</div>
+        <h3>General Scripting Solutions</h3>
+        <ul>
+          <li>Need something unique?</li>
+          <li>I build tailored systems from scratch to match your exact vision</li>
+          <li>No templates, no shortcuts</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-divider"></div>
+
+  <div class="section">
+    <h2 class="section-title">Languages & Technologies</h2>
+    <div class="tech-grid">
+      <div class="tech-pill">JavaScript (Node.js)</div>
+      <div class="tech-pill">Lua</div>
+      <div class="tech-pill">C++</div>
+      <div class="tech-pill">Python</div>
+    </div>
+  </div>
+
+  <div class="section-divider"></div>
+
+  <div class="section">
+    <h2 class="section-title">Why Choose DiscoDev?</h2>
+    <div class="why-grid">
+      <div class="why-item"><span class="check">✅</span><p>11+ years of real scripting experience</p></div>
+      <div class="why-item"><span class="check">✅</span><p>Clean, optimized, and maintainable code</p></div>
+      <div class="why-item"><span class="check">✅</span><p>Fast delivery & clear communication</p></div>
+      <div class="why-item"><span class="check">✅</span><p>Built for performance and scalability</p></div>
+    </div>
+  </div>
+
+  <div class="section-divider"></div>
+
+  <div class="section">
+    <h2 class="section-title">My Approach</h2>
+    <p style="color:rgba(214,240,255,0.78);line-height:1.85;margin-bottom:32px;max-width:700px;">Every project starts with understanding your needs. From there, I design and build systems that are:</p>
+    <div class="approach-list">
+      <div class="approach-item">⚡ Efficient</div>
+      <div class="approach-item">🔒 Secure</div>
+      <div class="approach-item">🛠 Easy to Manage</div>
+      <div class="approach-item">📈 Built to Grow</div>
+    </div>
+  </div>
+
+  <div class="cta-banner">
+    <h2>Let's Build Something Great</h2>
+    <p>Whether you're starting from scratch or upgrading an existing system, DiscoDev is here to help bring your ideas to life.</p>
+    <a href="https://discord.gg/G5CeyMWhPq" target="_blank" class="cta-btn" onclick="addRipple(event)">Get Started</a>
+  </div>
+</div>
+
+<!-- ===== ABOUT PAGE ===== -->
+<div id="page-about" class="page">
+  <div class="section" style="max-width:1000px;">
+    <div class="about-wrapper">
+      <div class="about-avatar">
+        <div class="avatar-ring">👨‍💻</div>
+        <p class="about-name">DISCODEV</p>
+        <p class="about-role">Full-Stack Script Developer</p>
+        <div class="stat-row">
+          <div class="stat-box"><span class="num">11+</span><span class="lbl">Years Exp.</span></div>
+          <div class="stat-box"><span class="num">22</span><span class="lbl">Years Old</span></div>
+        </div>
+      </div>
+
+      <div class="about-content">
+        <h2>About Me</h2>
+        <p>I'm a 22-year-old developer with a passion for building systems that actually work — efficiently, reliably, and at scale. I started scripting at just 11 years old, which gave me a strong foundation early on and years of hands-on experience before most people even begin.</p>
+        <p>My journey into coding started with JavaScript, where I was mentored by my dad, who worked in the field. He taught me the fundamentals of programming, problem-solving, and how to think like a developer — skills that still shape the way I build today.</p>
+        <p>Throughout high school, I continued developing my skills by taking multiple courses in engineering and computer science. That's where I expanded my knowledge, worked on real projects, and built a deeper understanding of how systems are designed and optimized.</p>
+        <p>Now, I focus on creating advanced solutions like Discord bots, automation systems, and custom scripting projects. Everything I build is designed to be clean, scalable, and tailored to the client's needs — no shortcuts, no copy-paste systems.</p>
+        <p>What started as curiosity turned into experience, and that experience turned into what I do today.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PRICING PAGE ===== -->
+<div id="page-pricing" class="page">
+  <div class="section">
+    <h2 class="section-title">Pricing</h2>
+    <p class="pricing-intro">I keep my pricing lower than most because I believe in giving back to the community that helped me grow. Not everyone has the budget for high-end development, and I don't think that should stop someone from bringing their ideas to life. My goal isn't just to make money — it's to support others, help projects succeed, and make quality scripting accessible to everyone who needs it.</p>
+
+    <div class="pricing-grid">
+      <div class="price-card">
+        <h3>Starter Package</h3>
+        <span class="price-amount">400 <span>Robux</span></span>
+        <div class="price-divider"></div>
+        <ul>
+          <li>Ticket system</li>
+          <li>Basic moderation (warn, mute, ban)</li>
+          <li>Verify system</li>
+          <li>Basic setup</li>
+        </ul>
+      </div>
+
+      <div class="price-card featured">
+        <h3>Advanced Package</h3>
+        <span class="price-amount">725 <span>Robux</span></span>
+        <div class="price-divider"></div>
+        <ul>
+          <li>Everything in Starter</li>
+          <li>Anti-raid system</li>
+          <li>Anti-nuke system</li>
+          <li>Level system</li>
+          <li>Invite tracker</li>
+          <li>Full setup + permissions</li>
+        </ul>
+      </div>
+
+      <div class="price-card">
+        <h3>Premium Package</h3>
+        <span class="price-amount">1300 <span>Robux</span></span>
+        <div class="price-divider"></div>
+        <ul>
+          <li>Everything above</li>
+          <li>Custom commands</li>
+          <li>Full server setup (channels + roles)</li>
+          <li>UI polish (embeds, buttons, emojis)</li>
+          <li>Priority support on all bugs</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="addons-card">
+      <h3>Add-ons</h3>
+      <div class="addons-grid">
+        <div class="addon-item">
+          <strong>Custom Command</strong>
+          <span class="addon-price">+100 Robux</span>
+        </div>
+        <div class="addon-item">
+          <strong>UI Redesign</strong>
+          <span class="addon-price">+150 Robux</span>
+        </div>
+        <div class="addon-item">
+          <strong>Hosting Help</strong>
+          <span class="addon-price">+200 Robux</span>
+        </div>
+        <div class="addon-item">
+          <strong>Emergency Fix</strong>
+          <span class="addon-price">+100 Robux</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="disclaimer"><strong>Disclaimer:</strong> All purchases are final and tax is included on all purchases made.</p>
+  </div>
+</div>
+
+<!-- ===== GALLERY PAGE ===== -->
+<div id="page-gallery" class="page">
+  <div class="section">
+    <h2 class="section-title">Gallery</h2>
+    <p class="gallery-intro">A showcase of systems and bots built by DiscoDev. Each project is custom-built from scratch — no templates, no shortcuts.</p>
+
+    <div class="gallery-grid">
+
+      <!-- Screenshot: Designer Application flow -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:#111;padding:0;">
+          <img src="Screen Shot 2026-04-03 at 4.15.08 PM.png" alt="Designer Application" style="width:100%;height:100%;object-fit:cover;object-position:top;">
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Discord Bot · Live</span>
+          <h3>Designer Application System</h3>
+          <p>Full DM-based application flow — instructions, Q&amp;A collection, image submission, and staff review with approve/deny buttons.</p>
+        </div>
+      </div>
+
+      <!-- Screenshot: Questions embed -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:#111;padding:0;">
+          <img src="Screen Shot 2026-04-03 at 4.16.22 PM.png" alt="Application Questions" style="width:100%;height:100%;object-fit:cover;object-position:top;">
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Discord Bot · Live</span>
+          <h3>Multi-Step Application Flow</h3>
+          <p>10-question guided DM interview with answer collection, state tracking, and clean embedded formatting throughout.</p>
+        </div>
+      </div>
+
+      <!-- Screenshot: Almost there + image prompt -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:#111;padding:0;">
+          <img src="Screen Shot 2026-04-03 at 4.16.29 PM.png" alt="Portfolio submission" style="width:100%;height:100%;object-fit:cover;object-position:center;">
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Discord Bot · Live</span>
+          <h3>Portfolio Image Submission</h3>
+          <p>Prompts applicants to submit portfolio images after answering questions, with validation before forwarding.</p>
+        </div>
+      </div>
+
+      <!-- Screenshot: Staff review panel -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:#111;padding:0;">
+          <img src="Screen Shot 2026-04-03 at 4.17.15 PM.png" alt="Staff Review Panel" style="width:100%;height:100%;object-fit:cover;object-position:top;">
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Discord Bot · Live</span>
+          <h3>Staff Review & Approval Panel</h3>
+          <p>Applications forwarded to a log channel with embedded answers, portfolio images, and interactive Approve / Deny buttons for staff.</p>
+        </div>
+      </div>
+
+      <!-- Screenshot: Approval DM -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:#111;padding:0;">
+          <img src="Screen Shot 2026-04-03 at 4.17.30 PM.png" alt="Approval Message" style="width:100%;height:100%;object-fit:cover;object-position:center;">
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Discord Bot · Live</span>
+          <h3>Automated Approval DM</h3>
+          <p>On approval, the bot automatically DMs the applicant a personalised congratulations message and assigns the Designer role.</p>
+        </div>
+      </div>
+
+      <!-- Screenshot: Support ticket panel -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:#111;padding:0;">
+          <img src="Screen Shot 2026-04-03 at 8.54.29 PM.png" alt="Support Panel" style="width:100%;height:100%;object-fit:cover;object-position:top;">
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Discord Bot · Live</span>
+          <h3>Support Dashboard Panel</h3>
+          <p>Full branded ticket panel with select-menu routing across General, IA, and Management support — with header images and rich embeds.</p>
+        </div>
+      </div>
+
+      <!-- Security: Anti-Raid -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:linear-gradient(135deg,#020c1b,#0d2b54);">
+          <div class="code-preview">// 🚨 RAID DETECTED — AUTO LOCKDOWN
+recentJoins.push(Date.now());
+recentJoins = recentJoins.filter(
+  t => Date.now() - t &lt; RAID_TIME_WINDOW);
+
+if (recentJoins.length >= RAID_JOIN_THRESHOLD) {
+  raidMode = true;
+  // Delete all invites
+  invites.forEach(inv => inv.delete());
+  // Lock all channels
+  guild.channels.cache.forEach(ch =>
+    ch.permissionOverwrites.edit(
+      everyone, { SendMessages: false }));
+  // Ban raid members
+  recentMembers.forEach(m =>
+    m.ban({ reason: "Raid auto-ban" }));
+}</div>
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Security · Anti-Raid</span>
+          <h3>Anti-Raid Lockdown System</h3>
+          <p>Detects mass joins within a time window, wipes invites, locks all channels, and auto-bans raiders — then auto-unlocks after 10 minutes.</p>
+        </div>
+      </div>
+
+      <!-- Security: Anti-Nuke -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:linear-gradient(135deg,#020c1b,#0a1f3d);">
+          <div class="code-preview">// 🛡️ ANTI-NUKE TRACKER
 function trackNukeAction(guild, userId, reason) {
-  const now = Date.now();
-  if (!antiNukeTracker.has(userId)) {
-    antiNukeTracker.set(userId, { count: 1, first: now });
-    return;
-  }
   const data = antiNukeTracker.get(userId);
-  if (now - data.first > NUKER_TIME_WINDOW) {
-    data.count = 1;
-    data.first = now;
-    return;
-  }
   data.count++;
+  // Triggers after 3 destructive actions
+  // within a 10-second window
   if (data.count >= NUKER_THRESHOLD) {
-    punishNuker(guild, userId, reason);
-    antiNukeTracker.delete(userId);
-    return;
+    member.ban({ reason: `Anti-Nuke: ${reason}` });
+    logChannel.send(
+      `🚨 Nuker banned: &lt;@${userId}&gt;`);
+    // Lock server immediately
+    guild.channels.cache.forEach(ch =>
+      ch.permissionOverwrites.edit(
+        everyone, { SendMessages: false }));
   }
-  antiNukeTracker.set(userId, data);
+}</div>
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Security · Anti-Nuke</span>
+          <h3>Anti-Nuke Protection</h3>
+          <p>Tracks mass bans, channel deletions, role wipes, and webhook abuse — auto-bans the executor and locks the server within seconds.</p>
+        </div>
+      </div>
+
+      <!-- Automod showcase -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:linear-gradient(135deg,#020c1b,#0d2b54);">
+          <div class="code-preview">// 🤖 AUTOMOD ENGINE
+// Spam → 10min timeout
+if (filtered.length >= spamLimit)
+  member.timeout(10 * 60 * 1000);
+
+// Mass mention → 15min timeout
+if (mentionCount > MASS_MENTION_LIMIT)
+  member.timeout(15 * 60 * 1000);
+
+// Banned word → 30min + DM warning
+if (bannedWords.includes(normalized))
+  member.timeout(30 * 60 * 1000);
+
+// Also detects:
+// ✦ Discord invite links
+// ✦ Zalgo / unicode abuse
+// ✦ Repeated character spam
+// ✦ Excessive caps (70%+ threshold)
+// ✦ Emoji spam (&gt;10 emojis)</div>
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Security · Automod</span>
+          <h3>Full Automod Engine</h3>
+          <p>7-layer message filtering covering spam, invite links, mass mentions, banned words, zalgo text, caps abuse, and emoji flooding — all with logging.</p>
+        </div>
+      </div>
+
+      <!-- Ticket System code -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:linear-gradient(135deg,#020c1b,#0a1f3d);">
+          <div class="code-preview">// 🎫 TICKET SYSTEM v2
+const channel = await guild.channels.create({
+  name: `🔴-general-${cleanName}`,
+  type: ChannelType.GuildText,
+  parent: TICKET_CATEGORY,
+  permissionOverwrites: [
+    { id: guild.id,
+      deny: [ViewChannel] },
+    { id: user.id,
+      allow: [ViewChannel, SendMessages] },
+    { id: TICKET_SUPPORT_ROLE,
+      allow: [ViewChannel, SendMessages] }
+  ]
+});</div>
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Discord Bot</span>
+          <h3>Advanced Ticket System</h3>
+          <p>Select-menu ticket creation with permission-locked channels, claim/close flow, full transcript logging, and three support categories.</p>
+        </div>
+      </div>
+
+      <!-- XP Level System -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:linear-gradient(135deg,#020c1b,#0d2b54);">
+          <div class="code-preview">// ⭐ XP & LEVEL SYSTEM
+user.xp += Math.floor(Math.random()*10)+5;
+const requiredXP = user.level * 100;
+
+if (user.xp >= requiredXP) {
+  user.xp -= requiredXP;
+  user.level += 1;
+  channel.send(
+    `🎉 ${author} leveled up to Lv ${user.level}!`
+  );
+}
+// Leaderboard: /leaderboard
+// Check level: /mylevel
+// Max level cap: 100</div>
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Discord Bot</span>
+          <h3>XP & Leveling System</h3>
+          <p>Persistent XP system with random gain per message, level-up announcements, leaderboard command, and a configurable max-level cap.</p>
+        </div>
+      </div>
+
+      <!-- Lua / Roblox -->
+      <div class="gallery-card">
+        <div class="gallery-preview" style="background:linear-gradient(135deg,#020c1b,#0a1f3d);">
+          <div class="code-preview">-- 🎮 ROBLOX DATASTORE MODULE
+local DS = game:GetService("DataStoreService")
+local Store = DS:GetDataStore("PlayerData_v3")
+
+game.Players.PlayerAdded:Connect(function(plr)
+  local data = Store:GetAsync(plr.UserId) or {
+    coins = 0, level = 1, xp = 0
+  }
+  -- Apply to player leaderstats
+  setupLeaderstats(plr, data)
+end)
+
+-- Auto-save on leave
+game.Players.PlayerRemoving:Connect(
+  function(plr) Store:SetAsync(...) end)</div>
+        </div>
+        <div class="gallery-info">
+          <span class="gallery-tag">Lua / Roblox</span>
+          <h3>DataStore Player System</h3>
+          <p>Persistent player data with auto-save on leave, version control, and error-safe async handling for Roblox games.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<footer>
+  <p>© 2025 <span>DiscoDev</span> Scripting Services — All rights reserved.</p>
+</footer>
+
+<script>
+// ===== PAGE NAVIGATION =====
+function showPage(id, linkEl) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  if (linkEl) linkEl.classList.add('active');
+  window.scrollTo(0, 0);
+  return false;
 }
 
-// ===== UNIFIED INTERACTION HANDLER =====
-// ✅ FIX 6: Merged both interactionCreate listeners into one to prevent race conditions
-//            where both handlers fire simultaneously and can double-respond to an interaction.
-client.on('interactionCreate', async interaction => {
-
-  // ===== SLASH COMMANDS =====
-  if (interaction.isChatInputCommand()) {
-
-    // VERIFY
-    if (interaction.commandName === "verify") {
-      if (interaction.channelId !== VERIFY_CHANNEL_ID)
-        return interaction.reply({ content: "❌ Use this in verify channel.", ephemeral: true });
-
-      const member = await interaction.guild.members.fetch(interaction.user.id);
-      if (!member.roles.cache.has(UNVERIFIED_ROLE))
-        return interaction.reply({ content: "❌ Already verified.", ephemeral: true });
-
-      await member.roles.remove(UNVERIFIED_ROLE);
-      for (const role of VERIFIED_ROLES) await member.roles.add(role);
-      return interaction.reply({ content: "✅ Verified!", ephemeral: true });
-    }
-
-    // PROMOTE
-    if (interaction.commandName === "promote") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const user = interaction.options.getUser("user");
-      const role = interaction.options.getRole("role");
-      const reason = interaction.options.getString("reason") || "No reason provided";
-      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-      if (!member) return interaction.reply({ content: "User not found in server.", ephemeral: true });
-
-      await member.roles.add(role).catch(() => {});
-      addLog(member.id, "Promotion", interaction.user.tag, reason);
-
-      const embed = new EmbedBuilder()
-        .setTitle("Staff Promotion")
-        .setDescription(`Congratulations! ${member} has been promoted by ${interaction.user}.`)
-        .addFields(
-          { name: "Staff Member", value: `${member}`, inline: false },
-          { name: "New Rank", value: `${role}`, inline: false },
-          { name: "Reason", value: `${reason}`, inline: false }
-        )
-        .setColor("#f1c40f")
-        .setThumbnail(member.user.displayAvatarURL())
-        .setFooter({ text: `Promotion issued by ${interaction.user.tag}` })
-        .setTimestamp();
-
-      const channel = interaction.guild.channels.cache.get("1489097136929902624");
-      if (channel) channel.send({ content: `${member}`, embeds: [embed] });
-      return interaction.reply({ content: "✅ Promotion sent.", ephemeral: true });
-    }
-
-    // DEMOTE
-    if (interaction.commandName === "demote") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const member = interaction.options.getMember("user");
-      const demotedRole = interaction.options.getRole("demoted_to");
-      const removeRole = interaction.options.getRole("remove_role");
-      const reason = interaction.options.getString("reason");
-
-      await member.roles.remove(removeRole).catch(() => {});
-      await member.roles.add(demotedRole).catch(() => {});
-      addLog(member.id, "Demotion", interaction.user.tag, reason);
-
-      const embed = new EmbedBuilder()
-        .setTitle("<:florida2:1478801582056538305> Demotion")
-        .setDescription(`${member} has been demoted to ${demotedRole}.`)
-        .addFields(
-          { name: "Person", value: `${member}`, inline: false },
-          { name: "New Role", value: `${demotedRole}`, inline: false },
-          { name: "Reason", value: `${reason}`, inline: false }
-        )
-        .setColor("#2b2d31")
-        .setThumbnail(member.user.displayAvatarURL())
-        .setFooter({ text: `Demoted by ${interaction.user.tag}` })
-        .setTimestamp();
-
-      const channel = interaction.guild.channels.cache.get("1489097083029033060");
-      if (channel) channel.send({ content: `${member}`, embeds: [embed] });
-      return interaction.reply({ content: "✅ Demotion sent.", ephemeral: true });
-    }
-
-    // WARN
-    if (interaction.commandName === "warn") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const user = interaction.options.getUser("user");
-      const reason = interaction.options.getString("reason");
-      addLog(user.id, "Warning", interaction.user.tag, reason);
-      await interaction.reply({ content: `⚠️ ${user.tag} warned.` });
-      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
-    }
-
-    // LOGS
-    if (interaction.commandName === "logs") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const user = interaction.options.getUser("user");
-      const logs = playerLogs[user.id];
-      if (!logs || logs.length === 0)
-        return interaction.reply({ content: "No logs found.", ephemeral: true });
-
-      const formatted = logs.map(l => `• [${l.date}] ${l.type} | ${l.moderator} | ${l.reason}`).join("\n");
-      return interaction.reply({ content: formatted, ephemeral: true });
-    }
-
-    // CLEAR LOGS
-    if (interaction.commandName === "clearlogs") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const user = interaction.options.getUser("user");
-      playerLogs[user.id] = [];
-      saveLogs();
-      await interaction.reply({ content: `🧹 Logs cleared.` });
-      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
-    }
-
-    // STRIKE
-    if (interaction.commandName === "strike") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const user = interaction.options.getUser("user");
-      const reason = interaction.options.getString("reason");
-      // ✅ FIX 7: Fetch member properly — interaction.options.getMember can return null
-      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-
-      if (!strikeData[user.id]) strikeData[user.id] = 0;
-      strikeData[user.id] += 1;
-      saveStrikes();
-      const strikes = strikeData[user.id];
-
-      const embed = new EmbedBuilder()
-        .setTitle("<:dh:1487558730642882861> Strike")
-        .setDescription(`${user} has been issued a strike by ${interaction.user}.`)
-        .addFields(
-          { name: "> User", value: `${user}`, inline: false },
-          { name: "> Punishment", value: `Strike ${strikes}`, inline: false },
-          { name: "> Reason", value: `${reason}`, inline: false }
-        )
-        .setColor("#2b2d31")
-        .setThumbnail(user.displayAvatarURL())
-        .setFooter({ text: `Strike issued by ${interaction.user.tag}` })
-        .setTimestamp();
-
-      const channel = interaction.guild.channels.cache.get("1489097083029033060");
-      if (channel) channel.send({ content: `${user}`, embeds: [embed] });
-      await interaction.reply({ content: "✅ Strike issued.", ephemeral: true });
-
-      // ✅ FIX 8: Wrapped auto-ban in try/catch — member may have left before the ban fires
-      if (strikes === 5 && member) {
-        try {
-          await member.ban({ reason: "5 Strikes - 48 Hour Temp Ban" });
-          setTimeout(() => interaction.guild.members.unban(user.id).catch(() => {}), 48 * 60 * 60 * 1000);
-        } catch (err) {
-          console.error("Strike auto-ban failed:", err);
-        }
-      }
-    }
-
-    // CHECK STRIKES
-    if (interaction.commandName === "strikes") {
-      const user = interaction.options.getUser("user");
-      return interaction.reply({ content: `${user.tag} has ${strikeData[user.id] || 0} strike(s).`, ephemeral: true });
-    }
-
-    // MUTE
-    if (interaction.commandName === "mute") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const member = interaction.options.getMember("user");
-      const minutes = interaction.options.getInteger("minutes");
-      await member.timeout(minutes * 60 * 1000);
-      return interaction.reply(`${member.user.tag} muted for ${minutes} minutes.`);
-    }
-
-    // CLEAR STRIKES
-    if (interaction.commandName === "clearstrikes") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const user = interaction.options.getUser("user");
-      strikeData[user.id] = 0;
-      saveStrikes();
-      return interaction.reply({ content: `✅ Cleared all strikes for ${user.tag}.` });
-    }
-
-    // SLOWMODE
-    if (interaction.commandName === "slowmode") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const seconds = interaction.options.getInteger("seconds");
-      await interaction.channel.setRateLimitPerUser(seconds);
-      return interaction.reply(`Slowmode set to ${seconds} seconds.`);
-    }
-
-    // LOCKDOWN
-    if (interaction.commandName === "lockdown") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      interaction.guild.channels.cache.forEach(channel => {
-        if (channel.type === ChannelType.GuildText)
-          channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false }).catch(() => {});
-      });
-      return interaction.reply("🔒 Server lockdown enabled.");
-    }
-
-    // UNLOCKDOWN
-    if (interaction.commandName === "unlockdown") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      interaction.guild.channels.cache.forEach(channel => {
-        if (channel.type === ChannelType.GuildText)
-          channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: true }).catch(() => {});
-      });
-      return interaction.reply("🔓 Server lockdown removed.");
-    }
-
-    // BAN
-    if (interaction.commandName === "ban") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const user = interaction.options.getUser("user");
-      const reason = interaction.options.getString("reason") || "No reason provided";
-      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-      if (!member) return interaction.reply({ content: "User is not in this server.", ephemeral: true });
-
-      addLog(user.id, "Permanent Ban", interaction.user.tag, reason);
-      await member.ban({ reason });
-
-      const embed = new EmbedBuilder()
-        .setTitle(`${user.tag} | Ban`)
-        .setDescription(`Banned by ${interaction.user.tag}\nReason: ${reason}`)
-        .setColor(0xff0000)
-        .setTimestamp();
-
-      interaction.guild.channels.cache.get(BAN_LOG_CHANNEL)?.send({ embeds: [embed] });
-      await interaction.reply({ content: `${user.tag} banned.` });
-      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
-    }
-
-    // TEMP BAN
-    if (interaction.commandName === "tban") {
-      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-      const user = interaction.options.getUser("user");
-      const hours = interaction.options.getInteger("hours");
-      const reason = interaction.options.getString("reason");
-      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-      if (!member) return interaction.reply({ content: "User not found.", ephemeral: true });
-
-      await member.ban({ reason: `${reason} (${hours}h)` });
-      addLog(user.id, "Temp Ban", interaction.user.tag, reason);
-      // ✅ FIX 9: Wrapped temp ban unban in try/catch — guild or user may no longer be accessible
-      setTimeout(async () => {
-        try {
-          await interaction.guild.members.unban(user.id);
-        } catch (err) {
-          console.error("Temp ban unban failed:", err);
-        }
-      }, hours * 60 * 60 * 1000);
-      await interaction.reply({ content: `${user.tag} banned for ${hours} hours.` });
-      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
-    }
-
-    // MY LEVEL
-    if (interaction.commandName === "mylevel") {
-      const data = levelData[interaction.user.id];
-      if (!data) return interaction.reply({ content: "You have no XP yet.", ephemeral: true });
-      return interaction.reply({ content: `Level: ${data.level}\nXP: ${data.xp}/${data.level * 100}`, ephemeral: true });
-    }
-
-    // XP LEADERBOARD
-    if (interaction.commandName === "leaderboard") {
-      const sorted = Object.entries(levelData).sort((a, b) => b[1].level - a[1].level).slice(0, 10);
-      if (sorted.length === 0) return interaction.reply("No data yet.");
-      const leaderboard = sorted.map((u, i) => {
-        const m = interaction.guild.members.cache.get(u[0]);
-        return `${i + 1}. ${m ? m.user.tag : "Unknown"} — Level ${u[1].level}`;
-      }).join("\n");
-      return interaction.reply({ content: `🏆 **XP Leaderboard**\n\n${leaderboard}` });
-    }
-
-    // RECRUIT LEADERBOARD
-    if (interaction.commandName === "recruitleaderboard") {
-      const sorted = Object.entries(inviteData).sort((a, b) => b[1].invites - a[1].invites).slice(0, 10);
-      if (sorted.length === 0) return interaction.reply("No recruitment data yet.");
-      const leaderboard = sorted.map((u, i) => {
-        const m = interaction.guild.members.cache.get(u[0]);
-        return `${i + 1}. ${m ? m.user.tag : "Unknown"} — ${u[1].invites} invites`;
-      }).join("\n");
-      return interaction.reply({ content: `📈 **Recruitment Leaderboard**\n\n${leaderboard}` });
-    }
-
-    // MY INVITES
-    if (interaction.commandName === "myinvites") {
-      const data = inviteData[interaction.user.id];
-      if (!data) return interaction.reply({ content: "You have 0 invites.", ephemeral: true });
-      return interaction.reply({ content: `📊 You have invited ${data.invites} member(s).`, ephemeral: true });
-    }
-
-    // CLAIM
-    if (interaction.commandName === "claim") {
-      if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-        return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
-
-      const embed = new EmbedBuilder()
-        .setTitle("Ticket Claimed")
-        .setDescription(`${interaction.user} has claimed this ticket.`)
-        .setColor("#2A5CFF")
-        .setTimestamp();
-      await interaction.reply({ embeds: [embed] });
-    }
-
-    // CLOSE
-    if (interaction.commandName === "close") {
-      if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-        return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
-
-      const reason = interaction.options.getString("reason");
-      const channel = interaction.channel;
-      const channelName = channel.name;
-      const fetched = await channel.messages.fetch({ limit: 100 });
-      const transcript = fetched.reverse().map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`).join("\n");
-
-      let ticketType = "Ticket";
-      if (channelName.includes("general")) ticketType = "General Support";
-      else if (channelName.includes("ia")) ticketType = "Internal Affairs";
-      else if (channelName.includes("mgmt")) ticketType = "Management Support";
-
-      const opener = fetched.last()?.author ?? interaction.user;
-      const transcriptEmbed = new EmbedBuilder()
-        .setTitle(`${ticketType} - ${opener.tag}`)
-        .setDescription(`**Closed by:** ${interaction.user}\n**Reason:** ${reason}\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``)
-        .setColor("#2A5CFF")
-        .setTimestamp();
-
-      const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
-      if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
-      await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
-      setTimeout(() => channel.delete().catch(() => {}), 2000);
-    }
-
-    // CLOSEREQ
-    if (interaction.commandName === "closereq") {
-      if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-        return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
-
-      const embed = new EmbedBuilder()
-        .setTitle("Close Request")
-        .setDescription("The ticket support would like to know whether or not you want to close the ticket.")
-        .setColor("#2A5CFF")
-        .setTimestamp();
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`closereq_yes_${interaction.user.id}`).setLabel("Yes").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`closereq_no_${interaction.user.id}`).setLabel("No").setStyle(ButtonStyle.Danger)
-      );
-      await interaction.reply({ embeds: [embed], components: [row] });
-    }
-
-    return; // end of slash command block
-  }
-
-  // ===== BUTTONS & SELECT MENUS =====
-  if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
-
-  // ===== APPLICATION APPROVE/DENY =====
-  if (interaction.isButton() && interaction.customId.startsWith("appv2_")) {
-    const isMod = interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id));
-    if (!isMod) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-
-    const parts = interaction.customId.split("_");
-    const action = parts[1];
-    const userId = parts[2];
-
-    const targetUser = await client.users.fetch(userId).catch(() => null);
-
-    if (action === "approve") {
-      const member = await interaction.guild.members.fetch(userId).catch(() => null);
-      if (member) {
-        await member.roles.add(DESIGNER_ROLE_ID).catch(() => {});
-        await targetUser?.send(
-          "Congratulations on passing the Designer Application! Welcome to our team and we can't wait for you to start. You can view all information in the staff channel and if you have any questions ask a Senior Designer or the Lead Designer."
-        ).catch(() => {});
-      }
-      return interaction.update({ content: `✅ Approved by ${interaction.user.tag}`, components: [] });
-    }
-
-    if (action === "deny") {
-      await targetUser?.send(
-        "Unfortunately you have not been selected to join the Designer Team. You can re-apply in 72 hours if you would like."
-      ).catch(() => {});
-      return interaction.update({ content: `❌ Denied by ${interaction.user.tag}`, components: [] });
-    }
-  }
-
-  // ===== BOT APPROVAL =====
-  if (interaction.isButton() && interaction.customId.startsWith("bot_")) {
-    const isMod = interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id));
-    if (!isMod) return interaction.reply({ content: "❌ Only moderators can use this.", ephemeral: true });
-
-    const [action, type, userId] = interaction.customId.split("_");
-
-    if (action === "bot" && type === "deny") {
-      const member = await interaction.guild.members.fetch(userId).catch(() => null);
-      if (!member) return interaction.reply({ content: "Bot not found.", ephemeral: true });
-      await member.kick("Bot denied by moderator").catch(() => {});
-      await interaction.update({ content: `❌ Bot ${member.user.tag} was denied and kicked by ${interaction.user.tag}`, embeds: [], components: [] });
-    }
-
-    if (action === "bot" && type === "confirm") {
-      const member = await interaction.guild.members.fetch(userId).catch(() => null);
-      if (!member) return interaction.reply({ content: "Bot not found.", ephemeral: true });
-      await interaction.update({ content: `✅ Bot ${member.user.tag} was approved by ${interaction.user.tag}`, embeds: [], components: [] });
-    }
-  }
-
-  // ===== CLAIM TICKET (button) =====
-  if (interaction.customId === "claim_ticket") {
-    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-      return interaction.reply({ content: "❌ Only ticket staff can claim tickets.", ephemeral: true });
-
-    const claimEmbed = new EmbedBuilder()
-      .setTitle("**Ticket Claimed**")
-      .setDescription(`Your ticket has been claimed by ${interaction.user.tag}`)
-      .setColor("#2b2d31")
-      .setTimestamp();
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId("claim_ticket").setLabel("Claimed").setStyle(ButtonStyle.Success).setDisabled(true)
-    );
-
-    await interaction.message.edit({ embeds: [claimEmbed], components: [row] });
-    await interaction.channel.setName(`🟢-${interaction.channel.name.replace("🔴-", "")}`).catch(() => {});
-    await interaction.deferUpdate();
-  }
-
-  // ===== OPEN TICKET (select menu) =====
-  if (
-    (interaction.isStringSelectMenu() && interaction.customId === "ticket_select") ||
-    interaction.customId === "general_ticket" ||
-    interaction.customId === "ia_ticket" ||
-    interaction.customId === "mgmt_ticket"
-  ) {
-    const user = interaction.user;
-    const guild = interaction.guild;
-    const type = interaction.isStringSelectMenu() ? interaction.values[0] : interaction.customId;
-    const cleanName = user.username.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-    let name, title, ticketDescription;
-
-    if (type === "general_ticket") {
-      name = `🔴-general-${cleanName}`;
-      title = "General Support";
-      ticketDescription = "Thank you for opening a ticket, a staff member will be with you shortly. If you could provide the reason why you opened it while waiting that would be great, thanks.";
-    }
-    if (type === "ia_ticket") {
-      name = `🔴-ia-${cleanName}`;
-      title = "Internal Affairs Support";
-      ticketDescription = "Thank you for opening a ticket, an IA member will be with you shortly. Please explain why you opened the ticket while waiting.";
-    }
-    if (type === "mgmt_ticket") {
-      name = `🔴-mgmt-${cleanName}`;
-      title = "Management Support";
-      ticketDescription = "Thank you for opening a ticket, a HR member will be with you shortly. Please explain why you opened the ticket while waiting.";
-    }
-
-    const channel = await guild.channels.create({
-      name, type: ChannelType.GuildText, parent: TICKET_CATEGORY,
-      permissionOverwrites: [
-        { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-        { id: user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-        { id: TICKET_SUPPORT_ROLE, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
-      ]
-    });
-
-    const embed = new EmbedBuilder().setTitle(title).setDescription(ticketDescription).setColor("#2A5CFF").setTimestamp();
-    const buttons = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId("claim_ticket").setLabel("Claim").setStyle(ButtonStyle.Success)
-    );
-
-    channel.send({ embeds: [embed], components: [buttons] });
-    interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
-  }
-
-  // ===== CLOSE TICKET (button) =====
-  if (interaction.customId === "close_ticket") {
-    if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-      return interaction.reply({ content: "❌ Only ticket staff can close tickets.", ephemeral: true });
-
-    const channel = interaction.channel;
-    const channelName = channel.name;
-    const fetched = await channel.messages.fetch({ limit: 100 });
-    const transcript = fetched.reverse().map(m => `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}`).join("\n");
-
-    let ticketType = "Ticket";
-    if (channelName.includes("general")) ticketType = "General Support";
-    else if (channelName.includes("ia")) ticketType = "Internal Affairs";
-    else if (channelName.includes("mgmt")) ticketType = "Management Support";
-
-    const opener = fetched.last()?.author ?? interaction.user;
-    const transcriptEmbed = new EmbedBuilder()
-      .setTitle(`${ticketType} - ${opener.tag}`)
-      .setDescription(`**Closed by:** ${interaction.user}\n**Reason:** Button close\n\n**Transcript:**\n\`\`\`${transcript.slice(0, 3500) || "No messages found."}\`\`\``)
-      .setColor("#2A5CFF")
-      .setTimestamp();
-
-    const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
-    if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
-    await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
-    setTimeout(() => channel.delete().catch(() => {}), 2000);
-  }
-
-  // ===== CLOSE REQUEST BUTTONS =====
-  if (interaction.isButton() && interaction.customId.startsWith("closereq_")) {
-    const parts = interaction.customId.split("_");
-    const answer = parts[1];
-    const staffId = parts[2];
-
-    if (answer === "yes") {
-      await interaction.update({ components: [] });
-      await interaction.channel.send(`<@${staffId}> ${interaction.user.username} has chosen to close this ticket. Please proceed.`);
-    }
-    if (answer === "no") {
-      await interaction.update({ components: [] });
-      await interaction.channel.send(`<@${staffId}> ${interaction.user.username} has chosen to continue in the ticket.`);
-    }
-  }
+// ===== CUSTOM CURSOR =====
+const cursor = document.getElementById('cursor');
+let mouseX = 0, mouseY = 0;
+
+document.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  cursor.style.left = mouseX + 'px';
+  cursor.style.top = mouseY + 'px';
 });
 
-// ===== REGISTER SLASH COMMANDS =====
-const rest = new REST({ version: "10" }).setToken(TOKEN);
-(async () => {
-  try {
-    console.log("🔄 Refreshing application (/) commands...");
-    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands.map(cmd => cmd.toJSON()) });
-    console.log("✅ Slash commands registered.");
-  } catch (error) {
-    console.error(error);
+document.addEventListener('mousedown', e => {
+  cursor.classList.add('clicking');
+  spawnSparks(e.clientX, e.clientY);
+});
+
+document.addEventListener('mouseup', () => cursor.classList.remove('clicking'));
+
+// ===== SPARKS =====
+const sparkColors = ['#00d4ff','#3fa0dc','#7dd3f7','#ffffff','#2176ae','#00aaff'];
+
+function spawnSparks(x, y) {
+  const count = 10 + Math.floor(Math.random() * 6);
+  for (let i = 0; i < count; i++) {
+    const spark = document.createElement('div');
+    spark.className = 'spark';
+    const angle = (Math.PI * 2 / count) * i + (Math.random() - 0.5) * 0.5;
+    const dist = 30 + Math.random() * 45;
+    const tx = Math.cos(angle) * dist;
+    const ty = Math.sin(angle) * dist;
+    const color = sparkColors[Math.floor(Math.random() * sparkColors.length)];
+    const size = 3 + Math.random() * 4;
+    spark.style.cssText = `
+      left:${x}px; top:${y}px;
+      background:${color};
+      width:${size}px; height:${size}px;
+      --tx:${tx}px; --ty:${ty}px;
+      box-shadow: 0 0 6px ${color};
+    `;
+    document.body.appendChild(spark);
+    setTimeout(() => spark.remove(), 560);
   }
-})();
+}
 
-// ===== ANTI NUKE EVENTS =====
-client.on("channelDelete", async channel => {
-  const guild = channel.guild;
-  if (!guild) return;
-  const logs = await guild.fetchAuditLogs({ type: 12, limit: 1 });
-  const entry = logs.entries.first();
-  if (!entry) return;
-  const executorId = entry.executor?.id;
-  if (!executorId) return;
-  trackNukeAction(guild, executorId, "Channel Deletion");
-});
+// ===== BUTTON RIPPLE =====
+function addRipple(e) {
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height);
+  const ripple = document.createElement('span');
+  ripple.className = 'btn-ripple';
+  ripple.style.width = ripple.style.height = size + 'px';
+  ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+  ripple.style.top  = (e.clientY - rect.top  - size / 2) + 'px';
+  btn.appendChild(ripple);
+  setTimeout(() => ripple.remove(), 520);
+}
 
-client.on("channelCreate", async channel => {
-  const guild = channel.guild;
-  if (!guild) return;
-  const logs = await guild.fetchAuditLogs({ type: 10, limit: 1 });
-  const entry = logs.entries.first();
-  if (!entry) return;
-  const executorId = entry.executor?.id;
-  if (!executorId) return;
-  trackNukeAction(guild, executorId, "Mass Channel Creation");
-});
+// ===== WAVE LINE BACKGROUND =====
+const canvas = document.getElementById('hexCanvas');
+const ctx = canvas.getContext('2d');
+let W, H;
 
-client.on("guildBanAdd", async ban => {
-  const guild = ban.guild;
-  const logs = await guild.fetchAuditLogs({ type: 22, limit: 1 });
-  const entry = logs.entries.first();
-  if (!entry) return;
-  const executorId = entry.executor?.id;
-  if (!executorId) return;
-  trackNukeAction(guild, executorId, "Mass Ban Activity");
-});
+function initCanvas() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
 
-client.on("roleDelete", async role => {
-  const guild = role.guild;
-  const logs = await guild.fetchAuditLogs({ type: 32, limit: 1 });
-  const entry = logs.entries.first();
-  if (!entry) return;
-  const executorId = entry.executor?.id;
-  if (!executorId) return;
-  trackNukeAction(guild, executorId, "Role Deletion");
-});
+// Colour palette for the wave bands — dark blues with hints of teal/cyan
+const WAVE_COLORS = [
+  [2,   10,  28],   // near-black navy
+  [8,   28,  65],   // deep blue
+  [14,  55, 105],   // mid blue
+  [22,  90, 150],   // bright blue
+  [35, 140, 200],   // sky blue
+  [55, 185, 230],   // light cyan-blue
+];
 
-client.on("roleCreate", async role => {
-  const guild = role.guild;
-  const logs = await guild.fetchAuditLogs({ type: 30, limit: 1 });
-  const entry = logs.entries.first();
-  if (!entry) return;
-  const executorId = entry.executor?.id;
-  if (!executorId) return;
-  trackNukeAction(guild, executorId, "Mass Role Creation");
-});
+function lerp(a, b, t) { return a + (b - a) * t; }
 
-client.on("webhookUpdate", async channel => {
-  const guild = channel.guild;
-  if (!guild) return;
-  const logs = await guild.fetchAuditLogs({ type: 50, limit: 1 });
-  const entry = logs.entries.first();
-  if (!entry) return;
-  const executorId = entry.executor?.id;
-  if (!executorId) return;
-  const webhooks = await channel.fetchWebhooks().catch(() => null);
-  if (webhooks) webhooks.forEach(wh => wh.delete("Anti-nuke: unauthorized webhook").catch(() => {}));
-  trackNukeAction(guild, executorId, "Webhook Creation");
-});
+function getWaveColor(t) {
+  // t in [0,1] — map across palette
+  const idx = t * (WAVE_COLORS.length - 1);
+  const lo  = Math.floor(idx);
+  const hi  = Math.min(lo + 1, WAVE_COLORS.length - 1);
+  const f   = idx - lo;
+  return [
+    Math.round(lerp(WAVE_COLORS[lo][0], WAVE_COLORS[hi][0], f)),
+    Math.round(lerp(WAVE_COLORS[lo][1], WAVE_COLORS[hi][1], f)),
+    Math.round(lerp(WAVE_COLORS[lo][2], WAVE_COLORS[hi][2], f)),
+  ];
+}
 
-client.login(TOKEN);
+function drawWave(ts) {
+  ctx.clearRect(0, 0, W, H);
+
+  // Dark base fill
+  ctx.fillStyle = '#020a1c';
+  ctx.fillRect(0, 0, W, H);
+
+  const t = ts * 0.001;
+
+  // Draw multiple wave "ribbons" stacked vertically
+  // Each ribbon is a filled band between two sine curves
+  const RIBBON_COUNT = 18;
+
+  for (let i = 0; i < RIBBON_COUNT; i++) {
+    const progress = i / (RIBBON_COUNT - 1); // 0 → 1 top to bottom
+
+    // Each ribbon's vertical center — spread across full height
+    const centerY = H * 0.05 + H * 0.9 * progress;
+
+    // Wave parameters vary per ribbon for organic feel
+    const amp      = 28 + Math.sin(i * 0.7) * 18;      // amplitude
+    const freq     = 0.004 + i * 0.00015;               // spatial freq
+    const speed    = 0.38 + i * 0.03;                   // wave speed
+    const offset   = i * 1.1;                           // phase offset
+    const thickness = 3 + Math.sin(i * 0.5) * 2;       // ribbon thickness
+
+    // Colour: lighter ribbons toward center of screen
+    const colorT = 1 - Math.abs(progress - 0.5) * 1.6;
+    const clampedT = Math.max(0, Math.min(1, colorT));
+    const [r, g, b] = getWaveColor(clampedT);
+
+    // Opacity: brighter in the middle bands
+    const opacity = 0.25 + clampedT * 0.55;
+
+    // Build wave path
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 2) {
+      // Two overlapping sine waves for organic shape
+      const y = centerY
+        + Math.sin(x * freq + t * speed + offset) * amp
+        + Math.sin(x * freq * 1.7 + t * speed * 0.6 + offset + 1.4) * (amp * 0.3);
+      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+
+    ctx.strokeStyle = `rgba(${r},${g},${b},${opacity})`;
+    ctx.lineWidth   = thickness;
+    ctx.shadowColor = `rgba(${r},${g},${b},${opacity * 0.6})`;
+    ctx.shadowBlur  = 8 + clampedT * 12;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+}
+
+let hexes = []; // keep for compatibility — unused now
+function initHexes() { initCanvas(); }
+
+function animate(ts) {
+  drawWave(ts);
+  requestAnimationFrame(animate);
+}
+
+window.addEventListener('resize', initCanvas);
+initCanvas();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
