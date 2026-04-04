@@ -115,6 +115,11 @@ let inviteCache = new Map();
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
+  client.user.setPresence({
+    activities: [{ name: "over DevHub", type: 3 }], // 3 = Watching
+    status: "online"
+  });
+
   const guild = client.guilds.cache.get(GUILD_ID);
   if (!guild) return;
 
