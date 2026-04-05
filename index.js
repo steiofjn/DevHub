@@ -730,7 +730,7 @@ const commands = [
   new SlashCommandBuilder().setName('myinvites').setDescription('Check how many users you have invited'),
   new SlashCommandBuilder().setName('mylevel').setDescription('Check your level'),
   new SlashCommandBuilder().setName('leaderboard').setDescription('XP leaderboard'),
-  new SlashCommandBuilder().setName('setlevel').setDescription('Set a user's level (Mods only)')
+  new SlashCommandBuilder().setName('setlevel').setDescription("Set a user's level (Mods only)")
     .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
     .addIntegerOption(o => o.setName('level').setDescription('Level (1-50)').setRequired(true).setMinValue(1).setMaxValue(50)),
   new SlashCommandBuilder().setName('lockdown').setDescription('Lock the entire server'),
