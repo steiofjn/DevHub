@@ -11,7 +11,7 @@ const {
   StringSelectMenuBuilder,
   PermissionsBitField,
   ChannelType,
-  Partials  // ✅ FIX 1: Import Partials enum
+  Partials
 } = require('discord.js');
 
 const fs = require("fs");
@@ -90,12 +90,9 @@ function addLog(userId, type, moderator, reason) {
 }
 
 // ===== APPLICATION SESSION TRACKING =====
-// state: "instructions" | "awaiting_answers" | "awaiting_images"
 const applicationSessions = new Map();
 
 // ===== CLIENT =====
-// ✅ FIX 2: Use proper Partials enum values — string-based partials silently fail in discord.js v14
-//            and DMs will never be received without Partials.Channel
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -104,9 +101,9 @@ const client = new Client({
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildModeration,
-    GatewayIntentBits.GuildInvites  // ✅ FIX 3: Required for invite tracking/caching to work reliably
+    GatewayIntentBits.GuildInvites
   ],
-  partials: [Partials.Channel, Partials.Message]  // ✅ FIX: was ["CHANNEL", "MESSAGE"] which does nothing in v14
+  partials: [Partials.Channel, Partials.Message]
 });
 
 // ===== INVITE CACHE =====
@@ -116,7 +113,7 @@ client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   client.user.setPresence({
-    activities: [{ name: "Watching over DevHub", type: 3 }], // 3 = Watching
+    activities: [{ name: "Watching over DevHub", type: 3 }],
     status: "online"
   });
 
@@ -188,7 +185,6 @@ let raidMode = false;
 
 client.on("guildMemberAdd", async member => {
 
-  // Join gating: instantly kick if raid mode is active
   if (raidMode) {
     await member.kick("Server is in raid lockdown.").catch(() => {});
     await member.send("The server is currently under a raid lockdown. Please try joining again later.").catch(() => {});
@@ -216,7 +212,6 @@ client.on("guildMemberAdd", async member => {
       });
     }
 
-    // Ban all members who joined within the raid window
     const recentMembers = member.guild.members.cache
       .filter(m => Date.now() - m.joinedTimestamp < RAID_TIME_WINDOW)
       .values();
@@ -236,7 +231,6 @@ client.on("guildMemberAdd", async member => {
     }, 10 * 60 * 1000);
   }
 
-  // Alt account check BEFORE giving role
   const accountAge = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
   if (accountAge < MIN_ACCOUNT_AGE_DAYS) {
     await member.kick("Alt account detected (too new)").catch(() => {});
@@ -247,7 +241,6 @@ client.on("guildMemberAdd", async member => {
 
   await member.roles.add(UNVERIFIED_ROLE).catch(err => console.error("Failed to add unverified role:", err));
 
-  // Bot join approval
   if (member.user.bot) {
     const logChannel = member.guild.channels.cache.get(FULL_LOG_CHANNEL_ID);
     const embed = new EmbedBuilder()
@@ -263,7 +256,6 @@ client.on("guildMemberAdd", async member => {
     return;
   }
 
-  // Invite tracking
   const newInvites = await member.guild.invites.fetch();
   const oldInvites = inviteCache.get(member.guild.id);
   const usedInvite = newInvites.find(inv => oldInvites?.get(inv.code)?.uses < inv.uses);
@@ -290,7 +282,6 @@ client.on("guildMemberAdd", async member => {
 
 // ===== REMOVE INVITE IF USER LEAVES =====
 client.on("guildMemberRemove", async member => {
-  // Invite tracking cleanup
   for (const inviterId in inviteData) {
     const data = inviteData[inviterId];
     if (data.users && data.users.includes(member.id)) {
@@ -302,7 +293,6 @@ client.on("guildMemberRemove", async member => {
     }
   }
 
-  // Anti-nuke kick tracking
   const guild = member.guild;
   const logs = await guild.fetchAuditLogs({ type: 20, limit: 1 }).catch(() => null);
   if (!logs) return;
@@ -469,19 +459,15 @@ client.on("messageCreate", async message => {
 });
 
 // ===== MESSAGE CREATE — DMs (Application System) =====
-// ✅ FIX 4: Kept as a separate listener but now works because Partials.Channel is properly set.
-//            The DM listener is intentionally separate from guild messages — no issue with having both.
 client.on("messageCreate", async message => {
-  if (message.guild) return; // only DMs
+  if (message.guild) return;
   if (message.author.bot) return;
 
   const userId = message.author.id;
   const session = applicationSessions.get(userId);
-  // ✅ FIX 5: Trim and lowercase for reliable matching — trailing spaces/newlines won't break it
   const content = message.content.trim();
   const contentLower = content.toLowerCase();
 
-  // Trigger: user says "apply"
   if (!session && contentLower === "apply") {
     applicationSessions.set(userId, { state: "instructions", answers: [] });
 
@@ -499,7 +485,6 @@ client.on("messageCreate", async message => {
     return;
   }
 
-  // User says "ready" — send questions
   if (session && session.state === "instructions" && contentLower === "ready") {
     session.state = "awaiting_answers";
     session.answers = [];
@@ -528,14 +513,12 @@ client.on("messageCreate", async message => {
     return;
   }
 
-  // Collecting answers
   if (session && session.state === "awaiting_answers" && contentLower !== "done") {
     session.answers.push(content);
     applicationSessions.set(userId, session);
     return;
   }
 
-  // User says "done" — prompt for images
   if (session && session.state === "awaiting_answers" && contentLower === "done") {
     session.state = "awaiting_images";
     applicationSessions.set(userId, session);
@@ -550,7 +533,6 @@ client.on("messageCreate", async message => {
     return;
   }
 
-  // User sends images — finalise application
   if (session && session.state === "awaiting_images") {
     if (message.attachments.size === 0) {
       await message.author.send("Please send at least one image to complete your application.").catch(() => {});
@@ -588,7 +570,6 @@ client.on("messageCreate", async message => {
 
       await appChannel.send({ embeds: [appEmbed], components: [approveRow] });
 
-      // Send images as a second message
       const imageUrls = message.attachments.map(a => a.url).join("\n");
       await appChannel.send(`**Designer Application — ${message.author.tag}**\n${imageUrls}`);
     }
@@ -693,8 +674,6 @@ function trackNukeAction(guild, userId, reason) {
 }
 
 // ===== UNIFIED INTERACTION HANDLER =====
-// ✅ FIX 6: Merged both interactionCreate listeners into one to prevent race conditions
-//            where both handlers fire simultaneously and can double-respond to an interaction.
 client.on('interactionCreate', async interaction => {
 
   // ===== SLASH COMMANDS =====
@@ -703,27 +682,27 @@ client.on('interactionCreate', async interaction => {
     // VERIFY
     if (interaction.commandName === "verify") {
       if (interaction.channelId !== VERIFY_CHANNEL_ID)
-        return interaction.reply({ content: "❌ Use this in verify channel.", ephemeral: true });
+        return interaction.reply({ content: "❌ Use this in verify channel.", flags: 64 });
 
       const member = await interaction.guild.members.fetch(interaction.user.id);
       if (!member.roles.cache.has(UNVERIFIED_ROLE))
-        return interaction.reply({ content: "❌ Already verified.", ephemeral: true });
+        return interaction.reply({ content: "❌ Already verified.", flags: 64 });
 
       await member.roles.remove(UNVERIFIED_ROLE);
       for (const role of VERIFIED_ROLES) await member.roles.add(role);
-      return interaction.reply({ content: "✅ Verified!", ephemeral: true });
+      return interaction.reply({ content: "✅ Verified!", flags: 64 });
     }
 
     // PROMOTE
     if (interaction.commandName === "promote") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const user = interaction.options.getUser("user");
       const role = interaction.options.getRole("role");
       const reason = interaction.options.getString("reason") || "No reason provided";
       const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-      if (!member) return interaction.reply({ content: "User not found in server.", ephemeral: true });
+      if (!member) return interaction.reply({ content: "User not found in server.", flags: 64 });
 
       await member.roles.add(role).catch(() => {});
       addLog(member.id, "Promotion", interaction.user.tag, reason);
@@ -743,13 +722,13 @@ client.on('interactionCreate', async interaction => {
 
       const channel = interaction.guild.channels.cache.get("1489097136929902624");
       if (channel) channel.send({ content: `${member}`, embeds: [embed] });
-      return interaction.reply({ content: "✅ Promotion sent.", ephemeral: true });
+      return interaction.reply({ content: "✅ Promotion sent.", flags: 64 });
     }
 
     // DEMOTE
     if (interaction.commandName === "demote") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const member = interaction.options.getMember("user");
       const demotedRole = interaction.options.getRole("demoted_to");
@@ -775,13 +754,13 @@ client.on('interactionCreate', async interaction => {
 
       const channel = interaction.guild.channels.cache.get("1489097083029033060");
       if (channel) channel.send({ content: `${member}`, embeds: [embed] });
-      return interaction.reply({ content: "✅ Demotion sent.", ephemeral: true });
+      return interaction.reply({ content: "✅ Demotion sent.", flags: 64 });
     }
 
     // WARN
     if (interaction.commandName === "warn") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const user = interaction.options.getUser("user");
       const reason = interaction.options.getString("reason");
@@ -793,21 +772,21 @@ client.on('interactionCreate', async interaction => {
     // LOGS
     if (interaction.commandName === "logs") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const user = interaction.options.getUser("user");
       const logs = playerLogs[user.id];
       if (!logs || logs.length === 0)
-        return interaction.reply({ content: "No logs found.", ephemeral: true });
+        return interaction.reply({ content: "No logs found.", flags: 64 });
 
       const formatted = logs.map(l => `• [${l.date}] ${l.type} | ${l.moderator} | ${l.reason}`).join("\n");
-      return interaction.reply({ content: formatted, ephemeral: true });
+      return interaction.reply({ content: formatted, flags: 64 });
     }
 
     // CLEAR LOGS
     if (interaction.commandName === "clearlogs") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const user = interaction.options.getUser("user");
       playerLogs[user.id] = [];
@@ -819,11 +798,10 @@ client.on('interactionCreate', async interaction => {
     // STRIKE
     if (interaction.commandName === "strike") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const user = interaction.options.getUser("user");
       const reason = interaction.options.getString("reason");
-      // ✅ FIX 7: Fetch member properly — interaction.options.getMember can return null
       const member = await interaction.guild.members.fetch(user.id).catch(() => null);
 
       if (!strikeData[user.id]) strikeData[user.id] = 0;
@@ -846,9 +824,8 @@ client.on('interactionCreate', async interaction => {
 
       const channel = interaction.guild.channels.cache.get("1489097083029033060");
       if (channel) channel.send({ content: `${user}`, embeds: [embed] });
-      await interaction.reply({ content: "✅ Strike issued.", ephemeral: true });
+      await interaction.reply({ content: "✅ Strike issued.", flags: 64 });
 
-      // ✅ FIX 8: Wrapped auto-ban in try/catch — member may have left before the ban fires
       if (strikes === 5 && member) {
         try {
           await member.ban({ reason: "5 Strikes - 48 Hour Temp Ban" });
@@ -862,13 +839,13 @@ client.on('interactionCreate', async interaction => {
     // CHECK STRIKES
     if (interaction.commandName === "strikes") {
       const user = interaction.options.getUser("user");
-      return interaction.reply({ content: `${user.tag} has ${strikeData[user.id] || 0} strike(s).`, ephemeral: true });
+      return interaction.reply({ content: `${user.tag} has ${strikeData[user.id] || 0} strike(s).`, flags: 64 });
     }
 
     // MUTE
     if (interaction.commandName === "mute") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const member = interaction.options.getMember("user");
       const minutes = interaction.options.getInteger("minutes");
@@ -879,7 +856,7 @@ client.on('interactionCreate', async interaction => {
     // CLEAR STRIKES
     if (interaction.commandName === "clearstrikes") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const user = interaction.options.getUser("user");
       strikeData[user.id] = 0;
@@ -890,7 +867,7 @@ client.on('interactionCreate', async interaction => {
     // SLOWMODE
     if (interaction.commandName === "slowmode") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const seconds = interaction.options.getInteger("seconds");
       await interaction.channel.setRateLimitPerUser(seconds);
@@ -900,7 +877,7 @@ client.on('interactionCreate', async interaction => {
     // LOCKDOWN
     if (interaction.commandName === "lockdown") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       interaction.guild.channels.cache.forEach(channel => {
         if (channel.type === ChannelType.GuildText)
@@ -912,7 +889,7 @@ client.on('interactionCreate', async interaction => {
     // UNLOCKDOWN
     if (interaction.commandName === "unlockdown") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       interaction.guild.channels.cache.forEach(channel => {
         if (channel.type === ChannelType.GuildText)
@@ -924,12 +901,12 @@ client.on('interactionCreate', async interaction => {
     // BAN
     if (interaction.commandName === "ban") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const user = interaction.options.getUser("user");
       const reason = interaction.options.getString("reason") || "No reason provided";
       const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-      if (!member) return interaction.reply({ content: "User is not in this server.", ephemeral: true });
+      if (!member) return interaction.reply({ content: "User is not in this server.", flags: 64 });
 
       addLog(user.id, "Permanent Ban", interaction.user.tag, reason);
       await member.ban({ reason });
@@ -948,17 +925,16 @@ client.on('interactionCreate', async interaction => {
     // TEMP BAN
     if (interaction.commandName === "tban") {
       if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
-        return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
       const user = interaction.options.getUser("user");
       const hours = interaction.options.getInteger("hours");
       const reason = interaction.options.getString("reason");
       const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-      if (!member) return interaction.reply({ content: "User not found.", ephemeral: true });
+      if (!member) return interaction.reply({ content: "User not found.", flags: 64 });
 
       await member.ban({ reason: `${reason} (${hours}h)` });
       addLog(user.id, "Temp Ban", interaction.user.tag, reason);
-      // ✅ FIX 9: Wrapped temp ban unban in try/catch — guild or user may no longer be accessible
       setTimeout(async () => {
         try {
           await interaction.guild.members.unban(user.id);
@@ -973,8 +949,8 @@ client.on('interactionCreate', async interaction => {
     // MY LEVEL
     if (interaction.commandName === "mylevel") {
       const data = levelData[interaction.user.id];
-      if (!data) return interaction.reply({ content: "You have no XP yet.", ephemeral: true });
-      return interaction.reply({ content: `Level: ${data.level}\nXP: ${data.xp}/${data.level * 100}`, ephemeral: true });
+      if (!data) return interaction.reply({ content: "You have no XP yet.", flags: 64 });
+      return interaction.reply({ content: `Level: ${data.level}\nXP: ${data.xp}/${data.level * 100}`, flags: 64 });
     }
 
     // XP LEADERBOARD
@@ -1002,14 +978,14 @@ client.on('interactionCreate', async interaction => {
     // MY INVITES
     if (interaction.commandName === "myinvites") {
       const data = inviteData[interaction.user.id];
-      if (!data) return interaction.reply({ content: "You have 0 invites.", ephemeral: true });
-      return interaction.reply({ content: `📊 You have invited ${data.invites} member(s).`, ephemeral: true });
+      if (!data) return interaction.reply({ content: "You have 0 invites.", flags: 64 });
+      return interaction.reply({ content: `📊 You have invited ${data.invites} member(s).`, flags: 64 });
     }
 
     // CLAIM
     if (interaction.commandName === "claim") {
       if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-        return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
+        return interaction.reply({ content: "❌ Only ticket staff can use this.", flags: 64 });
 
       const embed = new EmbedBuilder()
         .setTitle("Ticket Claimed")
@@ -1022,7 +998,7 @@ client.on('interactionCreate', async interaction => {
     // CLOSE
     if (interaction.commandName === "close") {
       if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-        return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
+        return interaction.reply({ content: "❌ Only ticket staff can use this.", flags: 64 });
 
       const reason = interaction.options.getString("reason");
       const channel = interaction.channel;
@@ -1044,14 +1020,14 @@ client.on('interactionCreate', async interaction => {
 
       const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
       if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
-      await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
+      await interaction.reply({ content: "🗑️ Closing ticket...", flags: 64 });
       setTimeout(() => channel.delete().catch(() => {}), 2000);
     }
 
     // CLOSEREQ
     if (interaction.commandName === "closereq") {
       if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-        return interaction.reply({ content: "❌ Only ticket staff can use this.", ephemeral: true });
+        return interaction.reply({ content: "❌ Only ticket staff can use this.", flags: 64 });
 
       const embed = new EmbedBuilder()
         .setTitle("Close Request")
@@ -1066,7 +1042,7 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ embeds: [embed], components: [row] });
     }
 
-    return; // end of slash command block
+    return;
   }
 
   // ===== BUTTONS & SELECT MENUS =====
@@ -1075,7 +1051,7 @@ client.on('interactionCreate', async interaction => {
   // ===== APPLICATION APPROVE/DENY =====
   if (interaction.isButton() && interaction.customId.startsWith("appv2_")) {
     const isMod = interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id));
-    if (!isMod) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+    if (!isMod) return interaction.reply({ content: "❌ No permission.", flags: 64 });
 
     const parts = interaction.customId.split("_");
     const action = parts[1];
@@ -1106,20 +1082,20 @@ client.on('interactionCreate', async interaction => {
   // ===== BOT APPROVAL =====
   if (interaction.isButton() && interaction.customId.startsWith("bot_")) {
     const isMod = interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id));
-    if (!isMod) return interaction.reply({ content: "❌ Only moderators can use this.", ephemeral: true });
+    if (!isMod) return interaction.reply({ content: "❌ Only moderators can use this.", flags: 64 });
 
     const [action, type, userId] = interaction.customId.split("_");
 
     if (action === "bot" && type === "deny") {
       const member = await interaction.guild.members.fetch(userId).catch(() => null);
-      if (!member) return interaction.reply({ content: "Bot not found.", ephemeral: true });
+      if (!member) return interaction.reply({ content: "Bot not found.", flags: 64 });
       await member.kick("Bot denied by moderator").catch(() => {});
       await interaction.update({ content: `❌ Bot ${member.user.tag} was denied and kicked by ${interaction.user.tag}`, embeds: [], components: [] });
     }
 
     if (action === "bot" && type === "confirm") {
       const member = await interaction.guild.members.fetch(userId).catch(() => null);
-      if (!member) return interaction.reply({ content: "Bot not found.", ephemeral: true });
+      if (!member) return interaction.reply({ content: "Bot not found.", flags: 64 });
       await interaction.update({ content: `✅ Bot ${member.user.tag} was approved by ${interaction.user.tag}`, embeds: [], components: [] });
     }
   }
@@ -1127,7 +1103,7 @@ client.on('interactionCreate', async interaction => {
   // ===== CLAIM TICKET (button) =====
   if (interaction.customId === "claim_ticket") {
     if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-      return interaction.reply({ content: "❌ Only ticket staff can claim tickets.", ephemeral: true });
+      return interaction.reply({ content: "❌ Only ticket staff can claim tickets.", flags: 64 });
 
     const claimEmbed = new EmbedBuilder()
       .setTitle("**Ticket Claimed**")
@@ -1191,13 +1167,13 @@ client.on('interactionCreate', async interaction => {
     );
 
     channel.send({ embeds: [embed], components: [buttons] });
-    interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
+    interaction.reply({ content: `Ticket created: ${channel}`, flags: 64 });
   }
 
   // ===== CLOSE TICKET (button) =====
   if (interaction.customId === "close_ticket") {
     if (!interaction.member.roles.cache.has(TICKET_SUPPORT_ROLE))
-      return interaction.reply({ content: "❌ Only ticket staff can close tickets.", ephemeral: true });
+      return interaction.reply({ content: "❌ Only ticket staff can close tickets.", flags: 64 });
 
     const channel = interaction.channel;
     const channelName = channel.name;
@@ -1218,7 +1194,7 @@ client.on('interactionCreate', async interaction => {
 
     const transcriptChannel = interaction.guild.channels.cache.get("1489108262774247605");
     if (transcriptChannel) await transcriptChannel.send({ embeds: [transcriptEmbed] });
-    await interaction.reply({ content: "🗑️ Closing ticket...", ephemeral: true });
+    await interaction.reply({ content: "🗑️ Closing ticket...", flags: 64 });
     setTimeout(() => channel.delete().catch(() => {}), 2000);
   }
 
@@ -1240,6 +1216,9 @@ client.on('interactionCreate', async interaction => {
 });
 
 // ===== REGISTER SLASH COMMANDS =====
+// ⚠️ IMPORTANT: Bot must be re-invited with BOTH 'bot' AND 'applications.commands' scopes.
+// Go to: Discord Developer Portal → Your App → OAuth2 → URL Generator
+// Check both scopes, generate URL, and re-invite the bot to your server.
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 (async () => {
   try {
@@ -1247,15 +1226,19 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
     await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands.map(cmd => cmd.toJSON()) });
     console.log("✅ Slash commands registered.");
   } catch (error) {
-    console.error(error);
+    console.error("❌ Failed to register slash commands:", error.message);
+    console.error("⚠️  Make sure the bot is re-invited with the 'applications.commands' scope!");
   }
 })();
 
 // ===== ANTI NUKE EVENTS =====
+// All audit log fetches use .catch(() => null) to prevent crashes
+
 client.on("channelDelete", async channel => {
   const guild = channel.guild;
   if (!guild) return;
-  const logs = await guild.fetchAuditLogs({ type: 12, limit: 1 });
+  const logs = await guild.fetchAuditLogs({ type: 12, limit: 1 }).catch(() => null);
+  if (!logs) return;
   const entry = logs.entries.first();
   if (!entry) return;
   const executorId = entry.executor?.id;
@@ -1266,7 +1249,8 @@ client.on("channelDelete", async channel => {
 client.on("channelCreate", async channel => {
   const guild = channel.guild;
   if (!guild) return;
-  const logs = await guild.fetchAuditLogs({ type: 10, limit: 1 });
+  const logs = await guild.fetchAuditLogs({ type: 10, limit: 1 }).catch(() => null);
+  if (!logs) return;
   const entry = logs.entries.first();
   if (!entry) return;
   const executorId = entry.executor?.id;
@@ -1276,7 +1260,8 @@ client.on("channelCreate", async channel => {
 
 client.on("guildBanAdd", async ban => {
   const guild = ban.guild;
-  const logs = await guild.fetchAuditLogs({ type: 22, limit: 1 });
+  const logs = await guild.fetchAuditLogs({ type: 22, limit: 1 }).catch(() => null);
+  if (!logs) return;
   const entry = logs.entries.first();
   if (!entry) return;
   const executorId = entry.executor?.id;
@@ -1286,7 +1271,9 @@ client.on("guildBanAdd", async ban => {
 
 client.on("roleDelete", async role => {
   const guild = role.guild;
-  const logs = await guild.fetchAuditLogs({ type: 32, limit: 1 });
+  if (!guild) return;
+  const logs = await guild.fetchAuditLogs({ type: 32, limit: 1 }).catch(() => null);
+  if (!logs) return;
   const entry = logs.entries.first();
   if (!entry) return;
   const executorId = entry.executor?.id;
@@ -1296,7 +1283,9 @@ client.on("roleDelete", async role => {
 
 client.on("roleCreate", async role => {
   const guild = role.guild;
-  const logs = await guild.fetchAuditLogs({ type: 30, limit: 1 });
+  if (!guild) return;
+  const logs = await guild.fetchAuditLogs({ type: 30, limit: 1 }).catch(() => null);
+  if (!logs) return;
   const entry = logs.entries.first();
   if (!entry) return;
   const executorId = entry.executor?.id;
@@ -1307,7 +1296,8 @@ client.on("roleCreate", async role => {
 client.on("webhookUpdate", async channel => {
   const guild = channel.guild;
   if (!guild) return;
-  const logs = await guild.fetchAuditLogs({ type: 50, limit: 1 });
+  const logs = await guild.fetchAuditLogs({ type: 50, limit: 1 }).catch(() => null);
+  if (!logs) return;
   const entry = logs.entries.first();
   if (!entry) return;
   const executorId = entry.executor?.id;
