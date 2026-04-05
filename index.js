@@ -92,6 +92,55 @@ function addLog(userId, type, moderator, reason) {
 // ===== APPLICATION SESSION TRACKING =====
 const applicationSessions = new Map();
 
+// ===== APPLICATION DENIAL COOLDOWNS =====
+// Stores { deniedAt: timestamp } for users denied by moderators
+// Key: userId, Value: { deniedAt: Date.now() }
+const APPLICATION_COOLDOWN_MS = 48 * 60 * 60 * 1000; // 48 hours
+const applicationCooldowns = new Map();
+
+// ===== APPLICATION TIMEOUT (45 minutes) =====
+const APPLICATION_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes
+
+// Clears the session, cancels the timeout timer, and optionally DMs the user
+function clearApplicationSession(userId, sendTimeoutMessage = false) {
+  const session = applicationSessions.get(userId);
+  if (!session) return;
+
+  // Clear the scheduled timeout if it exists
+  if (session.timeoutTimer) {
+    clearTimeout(session.timeoutTimer);
+  }
+
+  applicationSessions.delete(userId);
+
+  if (sendTimeoutMessage) {
+    // Fetch the user and DM them about the timeout
+    client.users.fetch(userId).then(user => {
+      user.send(
+        "Your application has been timed out because you took too long. If you wish to submit another you are free to do so."
+      ).catch(() => {});
+    }).catch(() => {});
+  }
+}
+
+// Starts or resets the 45-minute inactivity timeout for a session
+function scheduleApplicationTimeout(userId) {
+  const session = applicationSessions.get(userId);
+  if (!session) return;
+
+  // Cancel any existing timer first
+  if (session.timeoutTimer) {
+    clearTimeout(session.timeoutTimer);
+  }
+
+  // Schedule a new timeout — fires after 45 minutes of inactivity
+  session.timeoutTimer = setTimeout(() => {
+    clearApplicationSession(userId, true); // true = send the timeout DM
+  }, APPLICATION_TIMEOUT_MS);
+
+  applicationSessions.set(userId, session);
+}
+
 // ===== CLIENT =====
 const client = new Client({
   intents: [
@@ -468,15 +517,48 @@ client.on("messageCreate", async message => {
   const content = message.content.trim();
   const contentLower = content.toLowerCase();
 
+  // ===== CANCEL COMMAND =====
+  // Can be used at any point during the application — does NOT trigger the 48hr cooldown
+  if (session && contentLower === "cancel") {
+    clearApplicationSession(userId, false); // false = no timeout DM, this is a manual cancel
+    await message.author.send(
+      "Your application has been cancelled! Feel free to apply again whenever."
+    ).catch(() => {});
+    return;
+  }
+
+  // ===== APPLY COMMAND =====
   if (!session && contentLower === "apply") {
-    applicationSessions.set(userId, { state: "instructions", answers: [] });
+
+    // Check if user is within the 48-hour denial cooldown
+    const cooldown = applicationCooldowns.get(userId);
+    if (cooldown) {
+      const elapsed = Date.now() - cooldown.deniedAt;
+      const remaining = APPLICATION_COOLDOWN_MS - elapsed;
+
+      if (remaining > 0) {
+        // Calculate how many full hours are left (rounded up so it never says "0 hours")
+        const hoursLeft = Math.ceil(remaining / (1000 * 60 * 60));
+        await message.author.send(
+          `Sorry, due to your recent application denial you are unable to apply again. You have **${hoursLeft} hour${hoursLeft !== 1 ? "s" : ""}** left until you are able to apply again.`
+        ).catch(() => {});
+        return;
+      } else {
+        // Cooldown has expired — remove it so they can apply freely
+        applicationCooldowns.delete(userId);
+      }
+    }
+
+    // Start the application session and the 45-minute timeout timer
+    applicationSessions.set(userId, { state: "instructions", answers: [], timeoutTimer: null });
+    scheduleApplicationTimeout(userId);
 
     const instructionsEmbed = new EmbedBuilder()
       .setTitle("Designer Application")
       .setDescription(
         "Thank you for applying to become a designer! Please follow these instructions so you can submit and finish the application.\n\n" +
         "When you finish reading this please say **ready** to start the application.\n\n" +
-        "Once done those questions say **done** and then follow the instructions that you are given."
+        "Once done those questions say **done** and then follow the instructions that you are given. If you feel like canceling at any point please just say **cancel**. Good luck!"
       )
       .setColor("#2A5CFF")
       .setTimestamp();
@@ -489,6 +571,7 @@ client.on("messageCreate", async message => {
     session.state = "awaiting_answers";
     session.answers = [];
     applicationSessions.set(userId, session);
+    scheduleApplicationTimeout(userId); // Reset the timer on activity
 
     const questionsEmbed = new EmbedBuilder()
       .setTitle("Designer Application")
@@ -516,12 +599,14 @@ client.on("messageCreate", async message => {
   if (session && session.state === "awaiting_answers" && contentLower !== "done") {
     session.answers.push(content);
     applicationSessions.set(userId, session);
+    scheduleApplicationTimeout(userId); // Reset the timer on every answer received
     return;
   }
 
   if (session && session.state === "awaiting_answers" && contentLower === "done") {
     session.state = "awaiting_images";
     applicationSessions.set(userId, session);
+    scheduleApplicationTimeout(userId); // Reset the timer on activity
 
     const almostThereEmbed = new EmbedBuilder()
       .setTitle("Almost there!")
@@ -538,6 +623,9 @@ client.on("messageCreate", async message => {
       await message.author.send("Please send at least one image to complete your application.").catch(() => {});
       return;
     }
+
+    // Application fully submitted — clear the session (no timeout DM needed)
+    clearApplicationSession(userId, false);
 
     await message.author.send(
       "Thank you for providing those images — your application will now be forwarded to the applications team where they will review and discuss your application."
@@ -574,7 +662,6 @@ client.on("messageCreate", async message => {
       await appChannel.send(`**Designer Application — ${message.author.tag}**\n${imageUrls}`);
     }
 
-    applicationSessions.delete(userId);
     return;
   }
 });
@@ -1072,8 +1159,10 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (action === "deny") {
+      // Record the denial timestamp so the user is blocked for 48 hours
+      applicationCooldowns.set(userId, { deniedAt: Date.now() });
       await targetUser?.send(
-        "Unfortunately you have not been selected to join the Designer Team. You can re-apply in 72 hours if you would like."
+        "Unfortunately you have not been selected to join the Designer Team. You can re-apply in 48 hours if you would like."
       ).catch(() => {});
       return interaction.update({ content: `❌ Denied by ${interaction.user.tag}`, components: [] });
     }
