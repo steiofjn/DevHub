@@ -491,17 +491,39 @@ client.on("messageCreate", async message => {
     }
   }
 
-  // ===== LEVEL SYSTEM =====
+  // ===== LEVEL SYSTEM (global per-user, saved to levels.json) =====
+  const MAX_LEVEL = 50;
+
   if (!levelData[message.author.id]) levelData[message.author.id] = { xp: 0, level: 1 };
   const userLevel = levelData[message.author.id];
-  const MAX_LEVEL = 100;
+
   if (userLevel.level < MAX_LEVEL) {
-    userLevel.xp += Math.floor(Math.random() * 10) + 5;
-    const requiredXP = userLevel.level * 100;
+    // Tiered XP gain and requirements based on current level
+    let xpGain, requiredXP;
+
+    if (userLevel.level <= 10) {
+      xpGain = 15;
+      requiredXP = 450;
+    } else if (userLevel.level <= 20) {
+      xpGain = 20;
+      requiredXP = 800;
+    } else if (userLevel.level <= 30) {
+      xpGain = 20;
+      requiredXP = 960;
+    } else if (userLevel.level <= 40) {
+      xpGain = 25;
+      requiredXP = 1200;
+    } else {
+      xpGain = 30;
+      requiredXP = 1500;
+    }
+
+    userLevel.xp += xpGain;
+
     if (userLevel.xp >= requiredXP) {
       userLevel.xp -= requiredXP;
-      userLevel.level += 1;
-      message.channel.send(`🎉 ${message.author} leveled up to Level ${userLevel.level}!`);
+      userLevel.level = Math.min(userLevel.level + 1, MAX_LEVEL);
+      message.channel.send(`🎉 ${message.author} leveled up to **Level ${userLevel.level}**!`);
     }
     saveLevels();
   }
@@ -708,6 +730,9 @@ const commands = [
   new SlashCommandBuilder().setName('myinvites').setDescription('Check how many users you have invited'),
   new SlashCommandBuilder().setName('mylevel').setDescription('Check your level'),
   new SlashCommandBuilder().setName('leaderboard').setDescription('XP leaderboard'),
+  new SlashCommandBuilder().setName('setlevel').setDescription('Set a user's level (Mods only)')
+    .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
+    .addIntegerOption(o => o.setName('level').setDescription('Level (1-50)').setRequired(true).setMinValue(1).setMaxValue(50)),
   new SlashCommandBuilder().setName('lockdown').setDescription('Lock the entire server'),
   new SlashCommandBuilder().setName('unlockdown').setDescription('Unlock the server'),
   new SlashCommandBuilder().setName('claim').setDescription('Claim a ticket'),
@@ -1037,7 +1062,9 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === "mylevel") {
       const data = levelData[interaction.user.id];
       if (!data) return interaction.reply({ content: "You have no XP yet.", flags: 64 });
-      return interaction.reply({ content: `Level: ${data.level}\nXP: ${data.xp}/${data.level * 100}`, flags: 64 });
+      const lvl = data.level;
+      const req = lvl <= 10 ? 450 : lvl <= 20 ? 800 : lvl <= 30 ? 960 : lvl <= 40 ? 1200 : 1500;
+      return interaction.reply({ content: `Level: ${data.level}\nXP: ${data.xp}/${req}`, flags: 64 });
     }
 
     // XP LEADERBOARD
@@ -1049,6 +1076,22 @@ client.on('interactionCreate', async interaction => {
         return `${i + 1}. ${m ? m.user.tag : "Unknown"} — Level ${u[1].level}`;
       }).join("\n");
       return interaction.reply({ content: `🏆 **XP Leaderboard**\n\n${leaderboard}` });
+    }
+
+    // SET LEVEL
+    if (interaction.commandName === "setlevel") {
+      if (!interaction.member.roles.cache.some(role => MOD_ROLE_ID.includes(role.id)))
+        return interaction.reply({ content: "❌ No permission.", flags: 64 });
+
+      const user = interaction.options.getUser("user");
+      const newLevel = interaction.options.getInteger("level");
+
+      if (!levelData[user.id]) levelData[user.id] = { xp: 0, level: 1 };
+      levelData[user.id].level = newLevel;
+      levelData[user.id].xp = 0;
+      saveLevels();
+
+      return interaction.reply({ content: `✅ Set ${user.tag}'s level to **${newLevel}** (XP reset to 0).`, flags: 64 });
     }
 
     // RECRUIT LEADERBOARD
