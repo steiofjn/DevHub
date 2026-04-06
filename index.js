@@ -162,7 +162,7 @@ client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   client.user.setPresence({
-    activities: [{ name: "Watching over DevHub", type: 3 }],
+    activities: [{ name: "Powering DevHub", type: 3 }],
     status: "online"
   });
 
