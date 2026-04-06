@@ -176,7 +176,7 @@ client.once("ready", async () => {
   if (!panelChannel) return;
 
   const headerEmbed = new EmbedBuilder()
-    .setColor("#2A5CFF")
+    .setColor("#ffffff")
     .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1490516882309255278/I4.webp");
 
 const ticketEmbed = new EmbedBuilder()
