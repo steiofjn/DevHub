@@ -34,7 +34,7 @@ const FULL_LOG_CHANNEL_ID = "1487555326713528494";
 const BAN_LOG_CHANNEL = "1487555326713528494";
 const INVITE_LOG_CHANNEL = "1487555326713528494";
 const APPLICATION_LOG_CHANNEL = "1489705795594490068";
-const REVIEW_CHANNEL_ID = "1490592890706198551";
+const REVIEW_CHANNEL_ID = "1489095826817941617";
 const MIN_ACCOUNT_AGE_DAYS = 7;
 
 // ===== ROLES =====
@@ -167,27 +167,27 @@ client.once("ready", async () => {
     .setColor("#ffffff")
     .setAuthor({ name: "DevHub Support" })
     .setDescription(
-      "Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
+      "> Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
 
       "## General Support:\n" +
-      "• General Inquires\n" +
-      "• General Concerns\n" +
-      "• Member Report\n\n" +
+      "> • General Inquires\n" +
+      "> • General Concerns\n" +
+      "> • Member Report\n\n" +
 
       "## Interal Affairs Support:\n" +
-      "• Employee Report\n" +
-      "• Scam Report\n" +
-      "• LOA Request\n\n" +
+      "> • Employee Report\n" +
+      "> • Scam Report\n" +
+      "> • LOA Request\n\n" +
 
       "## Management Support:\n" +
-      "• High Rank Inquires\n" +
-      "• Role Request\n" +
-      "• Store Inquires\n\n" +
+      "> • High Rank Inquires\n" +
+      "> • Role Request\n" +
+      "> • Store Inquires\n\n" +
 
       "## Please Read Before Opening a Ticket:\n" +
-      "• Do not spam tickets\n" +
-      "• Provide detailed information\n" +
-      "• Be patient while waiting, Do not ping"
+      "> • Do not spam tickets\n" +
+      "> • Provide detailed information\n" +
+      "> • Be patient while waiting, Do not ping"
     )
     .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1490517079114256445/I13.webp")
     .setFooter({ text: "Developer Hub • Support System" });
