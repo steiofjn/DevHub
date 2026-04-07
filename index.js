@@ -160,7 +160,7 @@ client.once("ready", async () => {
   // Main ticket embed matching the screenshot layout
   const ticketEmbed = new EmbedBuilder()
     .setColor("#ffffff")
-    .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1490516882309255278/I4.webp");
+    .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1490516882309255278/I4.webp")
     .setAuthor({ name: "DevHub Support" })
     .setDescription(
       "Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
@@ -202,7 +202,7 @@ client.once("ready", async () => {
   const messages = await panelChannel.messages.fetch({ limit: 10 });
   const existing = messages.find(m => m.author.id === client.user.id);
   if (!existing) {
-    await panelChannel.send({ embeds: [headerEmbed, ticketEmbed], components: [row] });
+    await panelChannel.send({ embeds: [ticketEmbed], components: [row] });
   }
 });
 
