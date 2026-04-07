@@ -157,10 +157,14 @@ client.once("ready", async () => {
   const panelChannel = await guild.channels.fetch(TICKET_PANEL_CHANNEL);
   if (!panelChannel) return;
 
+    // Top banner image embed
+  const headerEmbed = new EmbedBuilder()
+    .setColor("#ffffff")
+    .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1490516882309255278/I4.webp");
+
   // Main ticket embed matching the screenshot layout
   const ticketEmbed = new EmbedBuilder()
     .setColor("#ffffff")
-    .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1490516882309255278/I4.webp")
     .setAuthor({ name: "DevHub Support" })
     .setDescription(
       "Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
@@ -193,9 +197,9 @@ client.once("ready", async () => {
       .setCustomId("ticket_select")
       .setPlaceholder("Select a ticket type...")
       .addOptions([
-        { label: "General Support", description: "Questions, help, or general issues", value: "general_ticket", emoji: { id: "1488905927896596582" } },
-        { label: "Internal Affairs", description: "Report staff or serious concerns", value: "ia_ticket", emoji: { id: "1480281879516283071" } },
-        { label: "Management", description: "Contact high command", value: "mgmt_ticket", emoji: { id: "1480283687223427313" } }
+        { label: "General Support", description: "Questions, help, or general issues", value: "general_ticket" },
+        { label: "Internal Affairs", description: "Report staff or serious concerns", value: "ia_ticket" },
+        { label: "Management", description: "Contact high command", value: "mgmt_ticket" }
       ])
   );
 
