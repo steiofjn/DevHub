@@ -165,7 +165,7 @@ client.once("ready", async () => {
   // Main ticket embed matching the screenshot layout
   const ticketEmbed = new EmbedBuilder()
     .setColor("#ffffff")
-    .setAuthor({ name: "bh Support", iconURL: "https://cdn.discordapp.com/emojis/1490211876007841823.webp" })
+    .setAuthor({ name: "# DevHub Support", iconURL: "https://cdn.discordapp.com/emojis/1490211876007841823.webp" })
     .setDescription(
       "Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
 
