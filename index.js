@@ -157,39 +157,10 @@ client.once("ready", async () => {
   const panelChannel = await guild.channels.fetch(TICKET_PANEL_CHANNEL);
   if (!panelChannel) return;
 
-    // Top banner image embed
-  const headerEmbed = new EmbedBuilder()
-    .setColor("#ffffff")
-    .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1490516882309255278/I4.webp");
-
   // Main ticket embed matching the screenshot layout
   const ticketEmbed = new EmbedBuilder()
-    .setColor("#ffffff")
-    .setAuthor({ name: "DevHub Support" })
-    .setDescription(
-      "> Welcome to the Support Dashboard! Here you can open a ticket for General, IA, and Management. Trolling or falsely opening tickets may result in you being punished. Please avoid pinging staff with-out valid reason.\n\n" +
-
-      "## General Support:\n" +
-      "> • General Inquires\n" +
-      "> • General Concerns\n" +
-      "> • Member Report\n\n" +
-
-      "## Interal Affairs Support:\n" +
-      "> • Employee Report\n" +
-      "> • Scam Report\n" +
-      "> • LOA Request\n\n" +
-
-      "## Management Support:\n" +
-      "> • High Rank Inquires\n" +
-      "> • Role Request\n" +
-      "> • Store Inquires\n\n" +
-
-      "## Please Read Before Opening a Ticket:\n" +
-      "> • Do not spam tickets\n" +
-      "> • Provide detailed information\n" +
-      "> • Be patient while waiting, Do not ping"
-    )
-    .setImage("https://cdn.discordapp.com/attachments/1487555326713528494/1490517079114256445/I13.webp")
+    .setColor("#2b2d31")
+    .setDescription(" Press this Dropdown Box to open your selected ticket! ")
     .setFooter({ text: "Developer Hub • Support System" });
 
   const row = new ActionRowBuilder().addComponents(
@@ -627,8 +598,8 @@ const commands = [
         { name: '⭐⭐⭐⭐', value: '⭐⭐⭐⭐' },
         { name: '⭐⭐⭐⭐⭐', value: '⭐⭐⭐⭐⭐' }
       ))
+.addStringOption(o => o.setName('reason').setDescription('Reason for review').setRequired(true))
     .addAttachmentOption(o => o.setName('image').setDescription('Image of the product (optional)').setRequired(false)),
-
   // ===== STATUS =====
   new SlashCommandBuilder().setName('status').setDescription('Check the status of your order'),
 
@@ -979,13 +950,14 @@ client.on('interactionCreate', async interaction => {
         return interaction.reply({ content: "❌ You do not have permission to submit reviews.", flags: 64 });
 
       const product = interaction.options.getString("product");
+      const reason = interaction.options.getString("reason");
       const designer = interaction.options.getString("designer");
       const rating = interaction.options.getString("rating");
       const image = interaction.options.getAttachment("image");
 
-      const reviewEmbed = new EmbedBuilder()
+const reviewEmbed = new EmbedBuilder()
         .setTitle(`New Review by ${interaction.user.username}`)
-        .setDescription(`**${product}**\nDesigner: ${designer}`)
+        .setDescription(`${reason}\n\nProduct: ${product}\nDesigner: ${designer}`)
         .addFields({ name: "Rating", value: rating })
         .setColor("#2A5CFF")
         .setFooter({ text: `Reviewed by ${interaction.user.tag}` })
