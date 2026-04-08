@@ -44,6 +44,15 @@ const MOD_ROLE_ID = [
   "1487552730963902707",
   "1482913822955274340"
 ];
+
+const EXEMPT_ROLES = [
+  "1487552685673812028",
+  "1489097900813189251",
+  "1489370034764779600",
+  "1489865799492436078",
+  "1487552709606248488"
+];
+
 const DESIGNER_ROLE_ID = "1489098027477106960";
 const REVIEWER_ROLE_ID = "1487552807442845938";
 const STATUS_UPDATE_ROLE_ID = "1489098884700700793";
@@ -225,6 +234,7 @@ client.on("guildMemberAdd", async member => {
     }, 10 * 60 * 1000);
   }
 
+  if (member.roles.cache.some(r => EXEMPT_ROLES.includes(r.id))) return;
   const accountAge = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
   if (accountAge < MIN_ACCOUNT_AGE_DAYS) {
     await member.kick("Alt account detected (too new)").catch(() => {});
@@ -319,6 +329,7 @@ const SPAM_TIME = 3000;
 // ===== MESSAGE CREATE — GUILD =====
 client.on("messageCreate", async message => {
   if (!message.guild || message.author.bot) return;
+  if (message.member && message.member.roles.cache.some(r => EXEMPT_ROLES.includes(r.id))) return;
   const member = message.member;
   const isNewMember = member && (Date.now() - member.joinedTimestamp) / (1000 * 60 * 60 * 24) < NEW_MEMBER_DAYS;
   const userId = message.author.id;
